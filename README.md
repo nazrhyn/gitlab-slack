@@ -1,0 +1,1 @@
+A service that receives hook notifications from GitLab and posts information to an incoming webhook on Slack.

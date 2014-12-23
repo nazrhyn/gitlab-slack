@@ -1,0 +1,4 @@
+.idea/
+node_modules/
+bower_modules/
+gitlab-slack.log

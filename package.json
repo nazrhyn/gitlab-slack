@@ -1,0 +1,22 @@
+{
+  "name": "gitlab-slack",
+  "version": "1.0.0",
+  "description": "A service that receives hook notifications from GitLab and posts information to an incoming webhook on Slack.",
+  "main": "server.js",
+  "dependencies": {
+    "log4js": "^0.6.21",
+    "q": "^1.1.2",
+    "request": "^2.51.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "***REMOVED***"
+  },
+  "author": "Chris Harwood",
+  "license": "ISC"
+}
