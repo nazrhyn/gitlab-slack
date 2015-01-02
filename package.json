@@ -4,7 +4,6 @@
   "description": "A service that receives hook notifications from GitLab and posts information to an incoming webhook on Slack.",
   "main": "server.js",
   "dependencies": {
-    "log4js": "^0.6.21",
     "q": "^1.1.2",
     "request": "^2.51.0"
   },

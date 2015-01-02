@@ -2,87 +2,92 @@
 
 var http = require("http"),
 	util = require("util"),
+	fs = require("fs"),
 	request = require("request"),
-	Q = require("q"),
-	log4js = require("log4js");
+	Q = require("q");
 
 var SLACK_WEBHOOK_URI = "***REMOVED***",
-	GITLAB_TOKEN = "***REMOVED***";
+	GITLAB_TOKEN = "***REMOVED***",
+	PORT = 21012;
 
 var projectChannelMap = {
 	12: "#maas"
 };
 
-log4js.configure({
-	appenders: [
-		{ type: "console" },
-		{ type: "file", filename: "gitlab-slack.log" }
-	]
-});
-var logger = log4js.getLogger();
+var logger = new Logger("gitlab-slack.log");
 
-var server = http.createServer(function(request, response) {
-	if (request.method == "POST") {
+var server = http.createServer(function(httpreq, httpresp) {
+	logger.debug(httpreq, "Request received.");
+
+	if (httpreq.method == "POST") {
 		var buffers = [];
 
-		request.on("data", function(data) {
+		httpreq.on("data", function(data) {
 			buffers.push(data);
 		});
 
-		request.on("end", function() {
+		httpreq.on("end", function() {
 			var data;
 
 			try {
 				data = JSON.parse(Buffer.concat(buffers).toString());
 			} catch (e) {
-				logger.error(e);
-				response.end();
+				logger.error(httpreq, e.toString());
+
+				httpresp.statusCode = 400;
+				httpresp.end(http.STATUS_CODES[400]);
 			}
 
+			logger.debug(httpreq, "DATA: %j", data);
+
 			if (data) {
-				parseNotification(data)
+				parseNotification(httpreq, data)
 					.catch(function(error) {
-						logger.error(error);
+						logger.error(httpreq, error);
+
+						httpresp.statusCode = 500;
+						httpresp.end(http.STATUS_CODES[500]);
 					})
-					.finally(function() {
-						response.end();
+					.then(function() {
+						httpresp.end();
 					});
 			}
 		});
 
 	} else {
-		response.statusCode = 405;
-		response.end(http.STATUS_CODES[405]);
+		httpresp.statusCode = 405;
+		httpresp.end(http.STATUS_CODES[405]);
 	}
 });
 
-logger.info("gitlab-slack listening for webhooks");
+logger.debug(null, "Listening on port %s.", PORT);
 
-server.listen(21012);
+server.listen(PORT);
 
 // ============================================================================================
 
 /**
  * Parses the raw notification data from the GitLab webhook.
+ * @param {Object} httpreq The HTTP request.
  * @param {Object} data The raw notification data.
  * @returns {Q.Promise} A promise that will be resolved when the data is processed.
  */
-function parseNotification(data) {
+function parseNotification(httpreq, data) {
 	var gitlab = new GitLab(GITLAB_TOKEN),
 		processed;
 
 	if (data.object_kind) {
 		switch (data.object_kind) {
 			case "issue":
-				processed = processIssue(gitlab, data.object_attributes);
+				processed = processIssue(httpreq, gitlab, data.object_attributes);
 				break;
 		}
 	} else if (data.commits) {
-		processed = processCommit(gitlab, data)
+		processed = processCommit(httpreq, gitlab, data)
 	}
 
 	if (!processed) {
-		processed = processUnrecognized(data);
+		processed = processUnrecognized(httpreq, data);
 	}
 
 	return processed.then(function(response) {
@@ -96,7 +101,7 @@ function parseNotification(data) {
 				body: response
 			},
 			function (error, response, body) {
-				processResponse(error, response, body)
+				processResponse("slack", error, response, body)
 					.then(function(response) {
 						deferred.resolve(response);
 					})
@@ -112,11 +117,14 @@ function parseNotification(data) {
 
 /**
  * Processes an issue message.
- * @param {GitLab} gitlab An instance of the GitLab API wrapper.
- * @param {Object} issueData The issue message data.
+ * @param {Object} httpreq      The HTTP request.
+ * @param {GitLab} gitlab       An instance of the GitLab API wrapper.
+ * @param {Object} issueData    The issue message data.
  * @returns {Q.Promise} A promise that will be resolved with the slack response.
  */
-function processIssue(gitlab, issueData) {
+function processIssue(httpreq, gitlab, issueData) {
+	logger.debug(httpreq, "PROCESS: Issue");
+
 	return Q.spread(
 		[gitlab.getProject(issueData.project_id), gitlab.getUserById(issueData.author_id)],
 		function(project, user) {
@@ -179,11 +187,14 @@ function processIssue(gitlab, issueData) {
 
 /**
  * Processes a commit message.
+ * @param {Object} httpreq      The HTTP request.
  * @param {GitLab} gitlab       An instance of the GitLab API wrapper.
  * @param {Object} commitData   The commit message data.
  * @returns {Q.Promise} A promise that will be resolved with the slack response.
  */
-function processCommit(gitlab, commitData) {
+function processCommit(httpreq, gitlab, commitData) {
+	logger.debug(httpreq, "PROCESS: Commit");
+
 	// Resolve the project ID and user ID to get more info.
 	var calls = [gitlab.getProject(commitData.project_id), gitlab.getUserById(commitData.user_id)];
 
@@ -248,10 +259,13 @@ function processCommit(gitlab, commitData) {
 
 /**
  * Processes an unrecognized message.
- * @param {Object} data The unrecognized data.
+ * @param {Object} httpreq  The HTTP request.
+ * @param {Object} data     The unrecognized data.
  * @returns {Q.Promise} A promise resolved with the unrecognized data.
  */
-function processUnrecognized(data) {
+function processUnrecognized(httpreq, data) {
+	logger.debug(httpreq, "PROCESS: Unrecognized");
+
 	// Post anything unrecognized raw to a DM.
 	var dataString = JSON.stringify(data, null, 4),
 		response = {
@@ -266,36 +280,98 @@ function processUnrecognized(data) {
 			}]
 		};
 
+	// just return a promise resolved with this value
 	return Q(response);
 }
 
 /**
  * Processes the response from a request.
+ * @param {String} source               The response source.
  * @param {*} error                     The error.
  * @param {IncomingMessage} response    The response.
  * @param {String|Object} body          The response body.
  * @returns {Q.Promise} A promise resolved or rejected depending on the properties of the response.
  */
-function processResponse(error, response, body) {
+function processResponse(source, error, response, body) {
 	var deferred = Q.defer();
 
 	if (error) {
-		deferred.reject(error);
+		deferred.reject(source.toUpperCase() + ": HTTP" + response.statusCode + " -- " + error);
 	} else if (response.statusCode < 200 || response.statusCode > 299) {
 		if (response.headers["content-length"] <= 250) {
 			if (typeof(body) !== "string") {
 				body = JSON.stringify(body);
 			}
 
-			deferred.reject(response.statusCode + ": " + body);
+			deferred.reject(source.toUpperCase() + ": HTTP" + response.statusCode + " -- " + body);
 		} else {
-			deferred.reject(response.statusCode + ": " + http.STATUS_CODES[response.statusCode]);
+			deferred.reject(source.toUpperCase() + ": HTTP" + response.statusCode + " -- " + http.STATUS_CODES[response.statusCode]);
 		}
 	} else {
 		deferred.resolve(body);
 	}
 
 	return deferred.promise;
+}
+
+/**
+ * Log writer.
+ * @param {String} filename The path to the file to which to log.
+ * @constructor
+ */
+function Logger(filename) {
+	var FORMAT_ENTRY = "[%s](%s)%s -- %s\n",
+		FORMAT_HTTP_INFO = " %s %s";
+
+	/**
+	 * Writes an entry to the log file.
+	 * @param {String} level        The log level.
+	 * @param {String} [httpreq]    The associated HTTP request.
+	 * @param {String} format       The log entry format.
+	 * @param {*...} args           The format arguments.
+	 */
+	this.log = function(level, httpreq, format, args) {
+		var formatArgs = [],
+			httpinfo = "";
+
+		for (var i = 2; i < arguments.length; i++) {
+			if (arguments[i]) formatArgs.push(arguments[i]);
+		}
+
+		if (httpreq) {
+			httpinfo = util.format(FORMAT_HTTP_INFO, httpreq.connection.remoteAddress, httpreq.method);
+		}
+
+		var entry = util.format(
+			FORMAT_ENTRY,
+			new Date().toISOString(),
+			level.toUpperCase(),
+			httpinfo,
+			util.format.apply(this, formatArgs)
+		);
+
+		fs.appendFile(filename, entry);
+	};
+
+	/**
+	 * Writes a debug entry to the log file.
+	 * @param {String} [httpreq]    The associated HTTP request.
+	 * @param {String} format       The log entry format.
+	 * @param {*...} args           The format arguments.
+	 */
+	this.debug = function(httpreq, format, args) {
+		this.log("DEBUG", httpreq, format, args);
+	};
+
+	/**
+	 * Writes an error entry to the log file.
+	 * @param {String} [httpreq]    The associated HTTP request.
+	 * @param {String} format       The log entry format.
+	 * @param {*...} args           The format arguments.
+	 */
+	this.error = function(httpreq, format, args) {
+		this.log("ERROR", httpreq, format, args);
+	};
 }
 
 /**
@@ -352,12 +428,11 @@ function GitLab(token) {
 				uri: uri,
 				headers: {
 					"PRIVATE-TOKEN": token
-				},
-				json: true,
+				},				json: true,
 				rejectUnauthorized: false
 			},
 			function (error, response, body) {
-				processResponse(error, response, body)
+				processResponse("gitlab", error, response, body)
 					.then(function(response) {
 						deferred.resolve(response);
 					})
