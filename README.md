@@ -33,3 +33,17 @@ Additional keys can be added for documentation purposes, but they will be ignore
 1. `update-rc.d gitlab-slack start 70 2 3 4 5 . stop 40 0 1 6 .`    
    On Ubuntu, set the start and stop priorities for the service script.
 1. `service gitlab-slack start`
+
+# Adding the GitLab Webhook
+
+> _The **Master** or **Owner** permission level is required to modify webhooks in GitLab. (see [Permissions](https://***REMOVED***/help/permissions/permissions.md))_
+
+1. From the project home, click **Settings**.
+1. Click **Web Hooks**.
+1. If **gitlab-slack** is running on the same server as GitLab, enter `http://127.0.0.1:PORT` into the **URL** field.    
+   Use the value of the `port` key from the `config.json` file in place of `PORT`.
+1. If **gitlab-slack** is running on another server, enter the appropriate DNS or URI.
+1. Check the **Push events**, **Tag push events** and **Issues events** options. **Merge Request events** are not supported.
+1. Click **Add Web Hook**.
+
+Once added, the webhook can be tested using the **Test Hook** button.
