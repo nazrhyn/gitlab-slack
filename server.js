@@ -6,65 +6,94 @@ var http = require("http"),
 	request = require("request"),
 	Q = require("q");
 
-var SLACK_WEBHOOK_URI = "***REMOVED***",
-	GITLAB_TOKEN = "***REMOVED***",
-	PORT = 21012;
+var LOG_FILE = "gitlab-slack.log",
+	CONFIG_FILE = "config.json";
 
-var projectChannelMap = {
-	12: "#maas"
-};
-
-var logger = new Logger("gitlab-slack.log");
-
-var server = http.createServer(function(httpreq, httpresp) {
-	logger.debug(httpreq, "Request received.");
-
-	if (httpreq.method == "POST") {
-		var buffers = [];
-
-		httpreq.on("data", function(data) {
-			buffers.push(data);
-		});
-
-		httpreq.on("end", function() {
-			var data;
-
-			try {
-				data = JSON.parse(Buffer.concat(buffers).toString());
-			} catch (e) {
-				logger.error(httpreq, e.toString());
-
-				httpresp.statusCode = 400;
-				httpresp.end(http.STATUS_CODES[400]);
-			}
-
-			logger.debug(httpreq, "DATA: %j", data);
-
-			if (data) {
-				parseNotification(httpreq, data)
-					.catch(function(error) {
-						logger.error(httpreq, error);
-
-						httpresp.statusCode = 500;
-						httpresp.end(http.STATUS_CODES[500]);
-					})
-					.then(function() {
-						httpresp.end();
-					});
-			}
-		});
-
-	} else {
-		httpresp.statusCode = 405;
-		httpresp.end(http.STATUS_CODES[405]);
-	}
+process.on("uncaughtException", function(err) {
+	// make sure we at least know what blew up before we quit
+	fs.appendFile(LOG_FILE, "UNCAUGHT EXCEPTION: " + err.toString());
+	process.exit(1);
 });
 
-logger.debug(null, "Listening on port %s.", PORT);
+var config,
+	logger = new Logger(LOG_FILE),
+	server = http.createServer(function(httpreq, httpresp) {
+		logger.debug(httpreq, "Request received.");
 
-server.listen(PORT);
+		if (httpreq.method == "POST") {
+			var buffers = [];
+
+			httpreq.on("data", function(data) {
+				buffers.push(data);
+			});
+
+			httpreq.on("end", function() {
+				var rawData = Buffer.concat(buffers).toString(),
+					data;
+
+				try {
+					data = JSON.parse(rawData);
+				} catch (e) {
+					logger.error(httpreq, e.toString());
+					logger.error(httpreq, "DATA: %s", rawData);
+
+					httpresp.statusCode = 400;
+					httpresp.end(http.STATUS_CODES[400]);
+				}
+
+				if (data) {
+					logger.debug(httpreq, "DATA: %j", data);
+
+					parseNotification(httpreq, data)
+						.catch(function(error) {
+							logger.error(httpreq, error);
+
+							httpresp.statusCode = 500;
+							httpresp.end(http.STATUS_CODES[500]);
+						})
+						.then(function() {
+							httpresp.end();
+						});
+				}
+			});
+
+		} else {
+			httpresp.statusCode = 405;
+			httpresp.end(http.STATUS_CODES[405]);
+		}
+	});
+
+getConfig()
+	.then(function(data) {
+		config = data;
+
+		logger.debug(null, "Listening on port %s.", config.port);
+
+		server.listen(config.port);
+	})
+	.catch(function(err) {
+		logger.error(null, "Unable to read config file. ERROR: %s", err);
+	});
 
 // ============================================================================================
+
+/**
+ * Gets the configuration from the config file.
+ * @returns {Q.Promise} A promise that will be resolved with the configuration data.
+ */
+function getConfig() {
+	var deferred = Q.defer();
+
+	fs.readFile(CONFIG_FILE, { encoding: "utf8" }, function(err, data) {
+		if (err) {
+			deferred.reject(err);
+		} else {
+			deferred.resolve(JSON.parse(data));
+		}
+	});
+
+	return deferred.promise;
+}
 
 /**
  * Parses the raw notification data from the GitLab webhook.
@@ -73,7 +102,7 @@ server.listen(PORT);
  * @returns {Q.Promise} A promise that will be resolved when the data is processed.
  */
 function parseNotification(httpreq, data) {
-	var gitlab = new GitLab(GITLAB_TOKEN),
+	var gitlab = new GitLab(config.gitlab_api_token),
 		processed;
 
 	if (data.object_kind) {
@@ -82,8 +111,12 @@ function parseNotification(httpreq, data) {
 				processed = processIssue(httpreq, gitlab, data.object_attributes);
 				break;
 		}
-	} else if (data.commits) {
-		processed = processCommit(httpreq, gitlab, data)
+	} else if (data.ref) {
+		if (data.commits) {
+			processed = processCommit(httpreq, gitlab, data);
+		} else {
+			processed = processTag(httpreq, gitlab, data);
+		}
 	}
 
 	if (!processed) {
@@ -91,12 +124,18 @@ function parseNotification(httpreq, data) {
 	}
 
 	return processed.then(function(response) {
+		if (!response) {
+			// If the processing resulted in nothing, it was probably ignored.
+			// Return a promise resolved with nothing.
+			return Q();
+		}
+
 		var deferred = Q.defer();
 
 		request(
 			{
 				method: "POST",
-				uri: SLACK_WEBHOOK_URI,
+				uri: config.slack_webhook_uri,
 				json: true,
 				body: response
 			},
@@ -123,17 +162,26 @@ function parseNotification(httpreq, data) {
  * @returns {Q.Promise} A promise that will be resolved with the slack response.
  */
 function processIssue(httpreq, gitlab, issueData) {
+	if (issueData.action === "update") {
+		// If this is a modify, ignore it. We don't want the spam.
+		// Return a promise resolved with nothing.
+		return Q();
+	}
+
 	logger.debug(httpreq, "PROCESS: Issue");
 
 	return Q.spread(
 		[gitlab.getProject(issueData.project_id), gitlab.getUserById(issueData.author_id)],
 		function(project, user) {
-			var channel = projectChannelMap[project.id],
+			var channel = config.project_channel_map[project.id.toString()],
 				verb;
 
 			switch (issueData.action) {
 				case "open":
 					verb = "created";
+					break;
+				case "reopen":
+					verb = "re-opened";
 					break;
 				case "update":
 					verb = "modified";
@@ -146,15 +194,29 @@ function processIssue(httpreq, gitlab, issueData) {
 					break;
 			}
 
-			var response = {
-				parse: "none",
-				text: util.format(
+			var text;
+
+			if (issueData.action === "open") {
+				text = util.format(
 					"[%s] Issue %s by <https://***REMOVED***/u/%s|%s>:",
 					project.path,
 					verb,
 					user.username,
 					user.username
-				),
+				);
+			} else {
+				text = util.format(
+					"[%s] <https://***REMOVED***/u/%s|%s>'s issue was %s:",
+					project.path,
+					user.username,
+					user.username,
+					verb
+				);
+			}
+
+			var response = {
+				parse: "none",
+				text: text,
 				attachments: [
 					{
 						fallback: util.format(
@@ -182,7 +244,7 @@ function processIssue(httpreq, gitlab, issueData) {
 
 			return response;
 		}
-	)
+	);
 }
 
 /**
@@ -204,7 +266,7 @@ function processCommit(httpreq, gitlab, commitData) {
 	});
 
 	return Q.spread(calls, function(project, user) {
-		var channel = projectChannelMap[project.id],
+		var channel = config.project_channel_map[project.id.toString()],
 			attachment = {
 				color: "#317CB9",
 				mrkdwn_in: ["text"]
@@ -255,6 +317,42 @@ function processCommit(httpreq, gitlab, commitData) {
 
 		return response;
 	});
+}
+
+/**
+ * Processes a tag message.
+ * @param {Object} httpreq The HTTP request.
+ * @param {GitLab} gitlab An instance of the GitLab API wrapper.
+ * @param {Object} tagData The tag message data.
+ * @returns {Q.Promise} A promise that will be resolved with the slack response.
+ */
+function processTag(httpreq, gitlab, tagData) {
+	logger.debug(httpreq, "PROCESS: Tag");
+
+	return Q.spread(
+		[gitlab.getProject(tagData.project_id), gitlab.getUserById(tagData.user_id)],
+		function(project, user) {
+			var channel = config.project_channel_map[project.id.toString()],
+				tag = tagData.ref.substr(tagData.ref.lastIndexOf("/") + 1),
+				response = {
+					text: util.format(
+						"[%s] <https://***REMOVED***/u/%s|%s> pushed tag <%s/commits/%s|%s>",
+						project.path,
+						user.username,
+						user.username,
+						project.web_url,
+						tag,
+						tag
+					)
+				};
+
+			if (channel) {
+				response.channel = channel;
+			}
+
+			return response;
+		}
+	);
 }
 
 /**
@@ -326,7 +424,7 @@ function Logger(filename) {
 	/**
 	 * Writes an entry to the log file.
 	 * @param {String} level        The log level.
-	 * @param {String} [httpreq]    The associated HTTP request.
+	 * @param {Object} [httpreq]    The associated HTTP request.
 	 * @param {String} format       The log entry format.
 	 * @param {*...} args           The format arguments.
 	 */
@@ -355,7 +453,7 @@ function Logger(filename) {
 
 	/**
 	 * Writes a debug entry to the log file.
-	 * @param {String} [httpreq]    The associated HTTP request.
+	 * @param {Object} [httpreq]    The associated HTTP request.
 	 * @param {String} format       The log entry format.
 	 * @param {*...} args           The format arguments.
 	 */
@@ -365,7 +463,7 @@ function Logger(filename) {
 
 	/**
 	 * Writes an error entry to the log file.
-	 * @param {String} [httpreq]    The associated HTTP request.
+	 * @param {Object} [httpreq]    The associated HTTP request.
 	 * @param {String} format       The log entry format.
 	 * @param {*...} args           The format arguments.
 	 */
@@ -413,7 +511,7 @@ function GitLab(token) {
 	 * Sends a request to the GitLab API.
 	 * @param {String} uri The URI.
 	 * @param {String} [method] The HTTP method. Default = GET
-	 * @returns {Promise} A promise that will be resolved with the response body.
+	 * @returns {Q.Promise} A promise that will be resolved with the response body.
 	 */
 	function sendRequest(uri, method) {
 		var deferred = Q.defer();

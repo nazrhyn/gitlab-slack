@@ -1,0 +1,127 @@
+#!/bin/bash
+
+APP_NAME="GitLab/Slack Integration"
+APP_DIR="/opt/gitlab-slack"
+NODE_APP="server.js"
+CONFIG_DIR="$APP_DIR"
+PID_DIR="$APP_DIR/pid"
+PID_FILE="$PID_DIR/app.pid"
+LOG_DIR=$APP_DIR
+LOG_FILE="$LOG_DIR/gitlab-slack.log"
+NODE_EXEC=$(which nodejs)
+
+USAGE="Usage: $0 {start|stop|restart|status} [--force]"
+
+pid_file_exists() {
+	[ -f "$PID_FILE" ]
+}
+
+get_pid() {
+	echo "$(cat "$PID_FILE")"
+}
+
+is_running() {
+	PID=$(get_pid)
+	[ -a "/proc/$PID" ] && [[ "$(cat "/proc/$PID/cmdline")" == *"$APP_DIR/$NODE_APP"* ]]
+}
+
+start_it() {
+	mkdir -p "$PID_DIR"
+	mkdir -p "$LOG_DIR"
+
+	if ! [ -a $LOG_FILE ]; then
+        touch $LOG_FILE
+        chmod 666 $LOG_FILE
+	fi
+
+	echo "Starting $APP_NAME..."
+	cd $APP_DIR
+	$NODE_EXEC "$APP_DIR/$NODE_APP" 1>>$LOG_FILE 2>&1 &
+	echo $! > $PID_FILE
+	echo "$APP_NAME started with PID $!."
+}
+
+stop_process() {
+	PID=$(get_pid)
+	echo "Killing process $PID..."
+	kill $PID
+}
+
+remove_pid_file() {
+	echo "Removing PID file..."
+	rm -f "$PID_FILE"
+}
+
+start_app() {
+	if pid_file_exists
+	then
+		if is_running
+		then
+			echo "$APP_NAME is already running with PID $(get_pid)."
+			exit 1
+		else
+			echo "Stale PID file detected."
+			remove_pid_file
+			start_it
+		fi
+	else
+		start_it
+	fi
+}
+
+stop_app() {
+	if pid_file_exists
+	then
+		if is_running
+		then
+			echo "Stopping $APP_NAME..."
+			stop_process
+			remove_pid_file
+			echo "$APP_NAME stopped."
+		else
+			echo "Stale PID file detected."
+			remove_pid_file
+		fi
+	else
+		echo "$APP_NAME is not running."
+		exit 1
+	fi
+}
+
+status_app() {
+	if pid_file_exists
+	then
+		if is_running
+		then
+			echo "$APP_NAME is running with PID $(get_pid)."
+		else
+			echo "$APP_NAME is not running. Stale PID file detected."
+		fi
+	else
+		echo "$APP_NAME is not running."
+	fi
+}
+
+case "$1" in
+	start)
+		start_app
+	;;
+
+	stop)
+		stop_app
+	;;
+
+	restart)
+		stop_app
+		start_app
+	;;
+
+	status)
+		status_app
+	;;
+
+	*)
+		echo $USAGE
+		exit 1
+	;;
+esac

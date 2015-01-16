@@ -1,0 +1,17 @@
+{
+  "slack_webhook_uri": "***REMOVED***",
+  "gitlab_api_token": "***REMOVED***",
+  "port": 21012,
+  "project_channel_map": {
+    "12": "#maas",
+    "25": "#uv",
+    "20": "#uv",
+    "29": "#uv"
+  },
+  "project_definition": {
+    "12": "maas_owf",
+    "25": "uv",
+    "20": "uv-framework",
+    "29": "cstrat"
+  }
+}
