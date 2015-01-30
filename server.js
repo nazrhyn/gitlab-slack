@@ -7,7 +7,8 @@ var http = require("http"),
 	Q = require("q");
 
 var LOG_FILE = "gitlab-slack.log",
-	CONFIG_FILE = "config.json";
+	CONFIG_FILE = "config.json",
+	REGEX_ALL_ZEROES = /^0+$/;
 
 process.on("uncaughtException", function(err) {
 	// make sure we at least know what blew up before we quit
@@ -108,12 +109,17 @@ function parseNotification(httpreq, data) {
 	if (data.object_kind) {
 		switch (data.object_kind) {
 			case "issue":
-				processed = processIssue(httpreq, gitlab, data.object_attributes);
+				processed = processIssue(httpreq, gitlab, data);
 				break;
 		}
 	} else if (data.ref) {
 		if (data.commits) {
-			processed = processCommit(httpreq, gitlab, data);
+			if (REGEX_ALL_ZEROES.test(data.before)) {
+				// If before is all zeroes, this is a new branch being pushed.
+				processed = processBranch(httpreq, gitlab, data);
+			} else {
+				processed = processCommit(httpreq, gitlab, data);
+			}
 		} else {
 			processed = processTag(httpreq, gitlab, data);
 		}
@@ -170,13 +176,18 @@ function processIssue(httpreq, gitlab, issueData) {
 
 	logger.debug(httpreq, "PROCESS: Issue");
 
+	var issueDetails = issueData.object_attributes;
+
 	return Q.spread(
-		[gitlab.getProject(issueData.project_id), gitlab.getUserById(issueData.author_id)],
-		function(project, user) {
+		[
+			gitlab.getProject(issueDetails.project_id),
+			gitlab.getUserById(issueDetails.author_id)
+		],
+		function(project, author) {
 			var channel = config.project_channel_map[project.id.toString()],
 				verb;
 
-			switch (issueData.action) {
+			switch (issueDetails.action) {
 				case "open":
 					verb = "created";
 					break;
@@ -190,27 +201,29 @@ function processIssue(httpreq, gitlab, issueData) {
 					verb = "closed";
 					break;
 				default:
-					verb = "(" + issueData.action + ")";
+					verb = "(" + issueDetails.action + ")";
 					break;
 			}
 
 			var text;
 
-			if (issueData.action === "open") {
+			if (issueDetails.action === "open") {
 				text = util.format(
 					"[%s] Issue %s by <https://***REMOVED***/u/%s|%s>:",
 					project.path,
 					verb,
-					user.username,
-					user.username
+					author.username,
+					author.username
 				);
 			} else {
 				text = util.format(
-					"[%s] <https://***REMOVED***/u/%s|%s>'s issue was %s:",
+					"[%s] <https://***REMOVED***/u/%s|%s>'s issue was %s by <https://***REMOVED***/u/%s|%s>:",
 					project.path,
-					user.username,
-					user.username,
-					verb
+					author.username,
+					author.username,
+					verb,
+					issueData.user.username,
+					issueData.user.username
 				);
 			}
 
@@ -221,22 +234,61 @@ function processIssue(httpreq, gitlab, issueData) {
 					{
 						fallback: util.format(
 							"#%s %s\r\n%s",
-							issueData.iid,
-							issueData.title,
-							issueData.description
+							issueDetails.iid,
+							issueDetails.title,
+							issueDetails.description
 						),
 						title: util.format(
 							"<%s|#%s %s>",
-							issueData.url,
-							issueData.iid,
-							issueData.title
+							issueDetails.url,
+							issueDetails.iid,
+							// Allow people use < & > in their titles.
+							issueDetails.title.replace("<", "&lt;").replace(">", "&gt;")
 						),
-						text: issueData.description,
+						text: issueDetails.description,
 						color: "#F28A2B",
 						mrkdwn_in: ["title", "text"]
 					}
 				]
 			};
+
+			if (channel) {
+				response.channel = channel;
+			}
+
+			return response;
+		}
+	);
+}
+
+/**
+ * Processes a new branch message.
+ * @param {Object} httpreq      The HTTP request.
+ * @param {GitLab} gitlab       An instance of the GitLab API wrapper.
+ * @param {Object} branchData   The branch message data.
+ * @returns {Q.Promise} A promise that will be resolved with the slack response.
+ */
+function processBranch(httpreq, gitlab, branchData) {
+	logger.debug(httpreq, "PROCESS: Branch");
+
+	return Q.spread(
+		// Resolve the project ID and user ID to get more info.
+		[gitlab.getProject(branchData.project_id), gitlab.getUserById(branchData.user_id)],
+		function(project, user) {
+			var channel = config.project_channel_map[project.id.toString()],
+				branch = branchData.ref.substr(branchData.ref.lastIndexOf("/") + 1),
+				response = {
+					parse: "none",
+					text: util.format(
+						"[%s] <https://***REMOVED***/u/%s|%s> pushed branch <%s/tree/%s|%s>",
+						project.path,
+						user.username,
+						user.username,
+						project.web_url,
+						branch,
+						branch
+					)
+				};
 
 			if (channel) {
 				response.channel = channel;
@@ -262,7 +314,7 @@ function processCommit(httpreq, gitlab, commitData) {
 
 	// Also resolve each commit's user by email address.
 	commitData.commits.forEach(function(c) {
-		calls.push(gitlab.searchUserByEmail(c.author.email));
+		calls.push(gitlab.searchUser(c.author.email));
 	});
 
 	return Q.spread(calls, function(project, user) {
@@ -330,6 +382,7 @@ function processTag(httpreq, gitlab, tagData) {
 	logger.debug(httpreq, "PROCESS: Tag");
 
 	return Q.spread(
+		// Resolve the project ID and user ID to get more info.
 		[gitlab.getProject(tagData.project_id), gitlab.getUserById(tagData.user_id)],
 		function(project, user) {
 			var channel = config.project_channel_map[project.id.toString()],
@@ -483,7 +536,7 @@ function GitLab(token) {
 	/**
 	 * Gets user information by ID.
 	 * @param {String|Number} id The user ID.
-	 * @returns {Promise} A promise that will be resolved with the user information.
+	 * @returns {Q.Promise} A promise that will be resolved with the user information.
 	 */
 	this.getUserById = function(id) {
 		return sendRequest(BASE_URI + "/users/:id".replace(":id", id));
@@ -492,16 +545,16 @@ function GitLab(token) {
 	/**
 	 * Searches for a user by email address.
 	 * @param {String} email User email address.
-	 * @returns {Promise} A promise that will be resolved with a list of matching users.
+	 * @returns {Q.Promise} A promise that will be resolved with a list of matching users.
 	 */
-	this.searchUserByEmail = function(email) {
+	this.searchUser = function(email) {
 		return sendRequest(BASE_URI + "/users?search=" + email);
 	};
 
 	/**
 	 * Gets project information by ID.
 	 * @param {String|Number} id The project ID.
-	 * @returns {Promise} A promise that will be resolved with the project information.
+	 * @returns {Q.Promise} A promise that will be resolved with the project information.
 	 */
 	this.getProject = function(id) {
 		return sendRequest(BASE_URI + "/projects/:id".replace(":id", id));

@@ -10,7 +10,7 @@ LOG_DIR=$APP_DIR
 LOG_FILE="$LOG_DIR/gitlab-slack.log"
 NODE_EXEC=$(which nodejs)
 
-USAGE="Usage: $0 {start|stop|restart|status} [--force]"
+USAGE="Usage: $0 {start|stop|restart|status}"
 
 pid_file_exists() {
 	[ -f "$PID_FILE" ]

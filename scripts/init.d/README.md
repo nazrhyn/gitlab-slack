@@ -1,6 +1,6 @@
 # gitlab-slack init.d script
 
-This is the `init.d` script for the `gitlab-slack` service. This script uses features and syntax from **bash**.
+This is the **init.d** bash script for the **gitlab-slack** service.
 
 ### Source
 
