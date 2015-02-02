@@ -1,6 +1,6 @@
 {
   "name": "gitlab-slack",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A service that receives hook notifications from GitLab and posts information to an incoming webhook on Slack.",
   "main": "server.js",
   "dependencies": {

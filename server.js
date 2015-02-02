@@ -168,15 +168,15 @@ function parseNotification(httpreq, data) {
  * @returns {Q.Promise} A promise that will be resolved with the slack response.
  */
 function processIssue(httpreq, gitlab, issueData) {
-	if (issueData.action === "update") {
+	var issueDetails = issueData.object_attributes;
+
+	if (issueDetails.action === "update") {
 		// If this is a modify, ignore it. We don't want the spam.
 		// Return a promise resolved with nothing.
 		return Q();
 	}
 
 	logger.debug(httpreq, "PROCESS: Issue");
-
-	var issueDetails = issueData.object_attributes;
 
 	return Q.spread(
 		[

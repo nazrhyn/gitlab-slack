@@ -1,3 +1,6 @@
+## 1.2.1 / 2015-02-02
+* Fixed but that allowed issue modification notifications to be sent.
+
 ## 1.2.0 / 2015-01-30
 * Added CHANGELOG.
 * Removed `--force` parameter from usage in **init.d** bash script.
