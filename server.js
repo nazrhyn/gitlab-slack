@@ -280,7 +280,7 @@ function processBranch(httpreq, gitlab, branchData) {
 				response = {
 					parse: "none",
 					text: util.format(
-						"[%s] <https://***REMOVED***/u/%s|%s> pushed branch <%s/tree/%s|%s>",
+						"[%s] <https://***REMOVED***/u/%s|%s> pushed new branch <%s/tree/%s|%s>",
 						project.path,
 						user.username,
 						user.username,
