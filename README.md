@@ -35,7 +35,6 @@ Additional keys can be added for documentation or other purposes, but they will 
 1. `service gitlab-slack start`
 
 # Adding the GitLab Webhook
-
 > _The **Master** or **Owner** permission level is required to modify webhooks in GitLab. (see [Permissions](https://***REMOVED***/help/permissions/permissions.md))_
 
 1. From the project home, click **Settings**.

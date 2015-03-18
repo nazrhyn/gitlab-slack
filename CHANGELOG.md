@@ -1,3 +1,8 @@
+## 1.2.2 / 2015-03-18
+* Added assignee to issue notifications.
+* Fixed bug that prevented notification when there was no GitLab user matching the commit email.
+* Changed to single-quoted strings.
+
 ## 1.2.1 / 2015-02-02
 * Fixed bug that allowed issue modification notifications to be sent.
 
