@@ -1,3 +1,14 @@
+## 1.3.0 / 2015-03-27
+* Updated **q** and **request** modules.
+* Fixed bug where uncaught exceptions were not being logged.
+* Added link/image markdown stripping from issue descriptions. Only the URL will show now.
+  * Re-enabled standard parsing mode for the attachment portion of issue notifications.
+* Added `.done()` to promise chains where appropriate.
+* Updated parser for webhook message schema changes in GitLab 7.9.x.
+* Added full support for tag/branch new/delete detection.
+* Changed Slack messages to use just line feed (`\n`) rather than carriage return, line feed (`\r\n`).
+* Changed issue notification to fill out the attachment's `title_link` instead of putting a manually-constructed link in `title`.
+
 ## 1.2.2 / 2015-03-18
 * Added assignee to issue notifications.
 * Fixed bug that prevented notification when there was no GitLab user matching the commit email.

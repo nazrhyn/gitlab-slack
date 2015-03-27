@@ -8,11 +8,12 @@ var http = require('http'),
 
 var LOG_FILE = 'gitlab-slack.log',
 	CONFIG_FILE = 'config.json',
-	REGEX_ALL_ZEROES = /^0+$/;
+	REGEX_ALL_ZEROES = /^0+$/,
+	REGEX_MARKDOWN_LINK = /!?\[[^\]]*]\(([^)]+)\)/g;
 
 process.on('uncaughtException', function(err) {
-	// make sure we at least know what blew up before we quit
-	fs.appendFile(LOG_FILE, 'UNCAUGHT EXCEPTION: ' + err.toString());
+	// Make sure we at least know what blew up before we quit.
+	fs.appendFileSync(LOG_FILE, 'UNCAUGHT EXCEPTION: ' + err.toString() + '\n' + err.stack);
 	process.exit(1);
 });
 
@@ -46,15 +47,16 @@ var config,
 					logger.debug(httpreq, 'DATA: %j', data);
 
 					parseNotification(httpreq, data)
+						.then(function() {
+							httpresp.end();
+						})
 						.catch(function(error) {
 							logger.error(httpreq, error);
 
 							httpresp.statusCode = 500;
 							httpresp.end(http.STATUS_CODES[500]);
 						})
-						.then(function() {
-							httpresp.end();
-						});
+						.done();
 				}
 			});
 
@@ -74,7 +76,8 @@ getConfig()
 	})
 	.catch(function(err) {
 		logger.error(null, 'Unable to read config file. ERROR: %s', err);
-	});
+	})
+	.done();
 
 // ============================================================================================
 
@@ -111,17 +114,20 @@ function parseNotification(httpreq, data) {
 			case 'issue':
 				processed = processIssue(httpreq, gitlab, data);
 				break;
-		}
-	} else if (data.ref) {
-		if (data.commits) {
-			if (REGEX_ALL_ZEROES.test(data.before)) {
-				// If before is all zeroes, this is a new branch being pushed.
-				processed = processBranch(httpreq, gitlab, data);
-			} else {
-				processed = processCommit(httpreq, gitlab, data);
-			}
-		} else {
-			processed = processTag(httpreq, gitlab, data);
+			case 'push':
+				var beforeZero = REGEX_ALL_ZEROES.test(data.before),
+					afterZero = REGEX_ALL_ZEROES.test(data.after);
+
+				if (beforeZero || afterZero) {
+					// If before or after is all zeroes, this is a new branch being pushed.
+					processed = processBranch(httpreq, gitlab, data, beforeZero, afterZero);
+				} else {
+					processed = processCommit(httpreq, gitlab, data);
+				}
+				break;
+			case 'tag_push':
+				processed = processTag(httpreq, gitlab, data);
+				break;
 		}
 	}
 
@@ -227,23 +233,18 @@ function processIssue(httpreq, gitlab, issueData) {
 			);
 
 			var response = {
-				parse: 'none',
 				text: text,
 				attachments: [
 					{
 						fallback: util.format(
-							'#%s %s\r\n%s',
+							'#%s %s\n%s',
 							issueDetails.iid,
 							issueDetails.title,
 							issueDetails.description
 						),
-						title: util.format(
-							'<%s|%s>',
-							issueDetails.url,
-							// Allow people use < & > in their titles.
-							issueDetails.title.replace('<', '&lt;').replace('>', '&gt;')
-						),
-						text: issueDetails.description,
+						title: issueDetails.title.replace('<', '&lt;').replace('>', '&gt;'), // Allow people use < & > in their titles.
+						title_link: issueDetails.url,
+						text: issueDetails.description.replace(REGEX_MARKDOWN_LINK, '$1'), // Remove markdown links so that slack can just auto-linkify them.
 						color: '#F28A2B',
 						mrkdwn_in: ['title', 'text']
 					}
@@ -264,10 +265,22 @@ function processIssue(httpreq, gitlab, issueData) {
  * @param {Object} httpreq      The HTTP request.
  * @param {GitLab} gitlab       An instance of the GitLab API wrapper.
  * @param {Object} branchData   The branch message data.
+ * @param {Boolean} beforeZero	Indicates whether the `before` hash is all zeroes.
+ * @param {Boolean} afterZero	Indicates whether the `after` hash is all zeroes.
  * @returns {Q.Promise} A promise that will be resolved with the slack response.
  */
-function processBranch(httpreq, gitlab, branchData) {
+function processBranch(httpreq, gitlab, branchData, beforeZero, afterZero) {
 	logger.debug(httpreq, 'PROCESS: Branch');
+
+	var action;
+
+	if (beforeZero) {
+		action = 'pushed new branch';
+	} else if (afterZero) {
+		action = 'deleted branch';
+	} else {
+		action = '[unknown]'
+	}
 
 	return Q.spread(
 		// Resolve the project ID and user ID to get more info.
@@ -278,10 +291,11 @@ function processBranch(httpreq, gitlab, branchData) {
 				response = {
 					parse: 'none',
 					text: util.format(
-						'[%s] <https://***REMOVED***/u/%s|%s> pushed new branch <%s/tree/%s|%s>',
+						'[%s] <https://***REMOVED***/u/%s|%s> %s <%s/tree/%s|%s>',
 						project.path,
 						user.username,
 						user.username,
+						action,
 						project.web_url,
 						branch,
 						branch
@@ -339,34 +353,36 @@ function processCommit(httpreq, gitlab, commitData) {
 		for (var i = 0; i < commitData.commits.length; i++) {
 			var commit = commitData.commits[i],
 				commitUser = arguments[i + 2][0], // all parameters after the static ones are commit users
-				commitId = commit.id.substr(0, 8),
-				message = commit.message.split(/(?:\r\n|[\r\n])/)[0];
+				commitUserName,
+				commitId = commit.id.substr(0, 8), // only the first 8 characters of the commit hash are needed
+				message = commit.message.split(/(?:\r\n|[\r\n])/)[0]; // only print the first line; support all line ending types
 
-			if (!commitUser) {
+
+			if (commitUser) {
+				commitUserName = commitUser.username;
+			} else {
 				// If the user couldn't be resolved, use the email in its place.
-				commitUser = {
-					username: commit.author.email
-				}
+				commitUserName = commit.author.email;
 			}
 
 			attachmentFallbacks.push(util.format(
 				'[%s] %s: %s',
-				commitUser.username,
+				commitUserName,
 				commitId,
 				message
 			));
 
 			attachmentTexts.push(util.format(
 				'[%s] <%s|%s>: %s',
-				commitUser.username,
+				commitUserName,
 				commit.url,
 				commitId,
 				message
 			));
 		}
 
-		attachment.fallback = attachmentFallbacks.join('\r\n');
-		attachment.text = attachmentTexts.join('\r\n');
+		attachment.fallback = attachmentFallbacks.join('\n');
+		attachment.text = attachmentTexts.join('\n');
 
 		if (channel) {
 			response.channel = channel;
@@ -386,6 +402,20 @@ function processCommit(httpreq, gitlab, commitData) {
 function processTag(httpreq, gitlab, tagData) {
 	logger.debug(httpreq, 'PROCESS: Tag');
 
+	// tags work like branches; before zero is add, after zero is delete
+	var beforeZero = REGEX_ALL_ZEROES.test(tagData.before),
+		afterZero = REGEX_ALL_ZEROES.test(tagData.after);
+
+	var action;
+
+	if (beforeZero) {
+		action = 'pushed new tag';
+	} else if (afterZero) {
+		action = 'deleted tag';
+	} else {
+		action = '[unknown]'
+	}
+
 	return Q.spread(
 		// Resolve the project ID and user ID to get more info.
 		[gitlab.getProject(tagData.project_id), gitlab.getUserById(tagData.user_id)],
@@ -394,10 +424,11 @@ function processTag(httpreq, gitlab, tagData) {
 				tag = tagData.ref.substr(tagData.ref.lastIndexOf('/') + 1),
 				response = {
 					text: util.format(
-						'[%s] <https://***REMOVED***/u/%s|%s> pushed tag <%s/commits/%s|%s>',
+						'[%s] <https://***REMOVED***/u/%s|%s> %s <%s/commits/%s|%s>',
 						project.path,
 						user.username,
 						user.username,
+						action,
 						project.web_url,
 						tag,
 						tag
