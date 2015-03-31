@@ -1,6 +1,6 @@
 **gitlab-slack** is a service that receives outgoing webhook notifications from GitLab and posts information to an incoming webhook on Slack.
 # Information
-**gitlab-slack** processes GitLab webhook messages for **commits**, **new branches**, **tags** and **issues**. **issue** messages
+**gitlab-slack** processes GitLab webhook messages for **commits**, **branches**, **tags** and **issues**. **issue** messages
 with an `action` of `update` are ignored.
 
 Status and error messages are logged to `gitlab-slack.log` in the application directory.
@@ -9,7 +9,8 @@ Status and error messages are logged to `gitlab-slack.log` in the application di
 **gitlab-slack** is configured by values in the `config.json` file. This file is expected to be in the application
 directory. The configuration file has the following keys:
 
-* `slack_webhook_uri` - The URI of the Slack incoming webhook.
+* `slack_webhook_url` - The URL of the Slack incoming webhook.
+* `gitlab_api_base_url` - The GitLab API base URL.
 * `gitlab_api_token` - The GitLab API token to use for GitLab API requests.
 * `port` - The port on which to listen.
 * `project_channel_map` - An object containing a mapping from GitLab project ID to Slack channel name. The channel name
@@ -21,7 +22,7 @@ Additional keys can be added for documentation or other purposes, but they will 
 > _**nodejs** and **npm** are prerequisites to the installation of this application._
 
 1. `cd /opt`
-1. `git clone ***REMOVED*** gitlab-slack`    
+1. `git clone <repository-url> gitlab-slack`    
     Clone the **gitlab-slack** repository into the `/opt` directory.
 1. `cd gitlab-slack`
 1. `npm install`    
@@ -35,7 +36,7 @@ Additional keys can be added for documentation or other purposes, but they will 
 1. `service gitlab-slack start`
 
 # Adding the GitLab Webhook
-> _The **Master** or **Owner** permission level is required to modify webhooks in GitLab. (see [Permissions](https://***REMOVED***/help/permissions/permissions.md))_
+> _The **Master** or **Owner** permission level is required to modify webhooks in GitLab._
 
 1. From the project home, click **Settings**.
 1. Click **Web Hooks**.

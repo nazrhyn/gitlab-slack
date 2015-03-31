@@ -1,3 +1,10 @@
+## 1.3.1 / 2015-03-31
+* Cleanup for initial push to GitHub.
+* Added MIT license.
+* Added TODO.
+* Changed configuration variables from URI to URL.
+* Added `gitlab_api_base_url` config setting.
+
 ## 1.3.0 / 2015-03-27
 * Updated **q** and **request** modules.
 * Fixed bug where uncaught exceptions were not being logged.

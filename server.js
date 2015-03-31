@@ -106,7 +106,7 @@ function getConfig() {
  * @returns {Q.Promise} A promise that will be resolved when the data is processed.
  */
 function parseNotification(httpreq, data) {
-	var gitlab = new GitLab(config.gitlab_api_token),
+	var gitlab = new GitLab(config.gitlab_api_base_url, config.gitlab_api_token),
 		processed;
 
 	if (data.object_kind) {
@@ -563,19 +563,18 @@ function Logger(filename) {
 
 /**
  * Wrapper for the GitLab API.
- * @param {String} token GitLab token.
+ * @param {String} baseUrl GitLab API base URL.
+ * @param {String} token GitLab API token.
  * @constructor
  */
-function GitLab(token) {
-	var BASE_URI = 'https://***REMOVED***/api/v3';
-
+function GitLab(baseUrl, token) {
 	/**
 	 * Gets user information by ID.
 	 * @param {String|Number} id The user ID.
 	 * @returns {Q.Promise} A promise that will be resolved with the user information.
 	 */
 	this.getUserById = function(id) {
-		return sendRequest(BASE_URI + '/users/:id'.replace(':id', id));
+		return sendRequest('/users/:id'.replace(':id', id));
 	};
 
 	/**
@@ -584,7 +583,7 @@ function GitLab(token) {
 	 * @returns {Q.Promise} A promise that will be resolved with a list of matching users.
 	 */
 	this.searchUser = function(email) {
-		return sendRequest(BASE_URI + '/users?search=' + email);
+		return sendRequest('/users?search=' + email);
 	};
 
 	/**
@@ -593,7 +592,7 @@ function GitLab(token) {
 	 * @returns {Q.Promise} A promise that will be resolved with the project information.
 	 */
 	this.getProject = function(id) {
-		return sendRequest(BASE_URI + '/projects/:id'.replace(':id', id));
+		return sendRequest('/projects/:id'.replace(':id', id));
 	};
 
 	/**
@@ -612,7 +611,7 @@ function GitLab(token) {
 		request(
 			{
 				method: method,
-				uri: uri,
+				uri: baseUrl + uri,
 				headers: {
 					'PRIVATE-TOKEN': token
 				},
