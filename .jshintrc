@@ -1,0 +1,19 @@
+{
+	"maxerr": 5000,
+	"strict": true,
+	"node": true,
+	"noempty": true,
+	"noarg": true,
+	"unused": "vars",
+	"eqeqeq": true,
+	"bitwise": true,
+	"curly": true,
+	"undef": true,
+	"nonew": true,
+	"forin": true,
+	"devel": true,
+	"globals": {
+		"_": false,
+		"Promise": false
+	}
+}

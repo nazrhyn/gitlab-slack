@@ -1,15 +1,19 @@
 'use strict';
 
+global._ = require('underscore');
+global.Promise = require('bluebird');
+
 var http = require('http'),
 	util = require('util'),
 	fs = require('fs'),
-	request = require('request'),
-	Q = require('q');
+	request = Promise.promisify(require('request'));
 
-var LOG_FILE = 'gitlab-slack.log',
+var readFile = Promise.promisify(fs.readFile),
+	LOG_FILE = 'gitlab-slack.log',
 	CONFIG_FILE = 'config.json',
 	REGEX_ALL_ZEROES = /^0+$/,
-	REGEX_MARKDOWN_LINK = /!?\[[^\]]*]\(([^)]+)\)/g;
+	REGEX_MARKDOWN_LINK = /!?\[[^\]]*]\(([^)]+)\)/g,
+	REGEX_ISSUE_MENTION = /#\d+/g;
 
 process.on('uncaughtException', function(err) {
 	// Make sure we at least know what blew up before we quit.
@@ -17,116 +21,102 @@ process.on('uncaughtException', function(err) {
 	process.exit(1);
 });
 
+/**
+ * @type {Configuration}
+ */
 var config,
+	gitlab,
 	logger = new Logger(LOG_FILE),
-	server = http.createServer(function(httpreq, httpresp) {
-		logger.debug(httpreq, 'Request received.');
+	server = http.createServer(function(req, res) {
+		logger.debug(req, 'Request received.');
 
-		if (httpreq.method == 'POST') {
+		if (req.method === 'POST') {
 			var buffers = [];
 
-			httpreq.on('data', function(data) {
+			req.on('data', function(data) {
 				buffers.push(data);
 			});
 
-			httpreq.on('end', function() {
+			req.on('end', function() {
 				var rawData = Buffer.concat(buffers).toString(),
 					data;
 
 				try {
 					data = JSON.parse(rawData);
 				} catch (e) {
-					logger.error(httpreq, e.toString());
-					logger.error(httpreq, 'DATA: %s', rawData);
+					logger.error(req, e.toString());
+					logger.error(req, 'DATA: %s', rawData);
 
-					httpresp.statusCode = 400;
-					httpresp.end(http.STATUS_CODES[400]);
+					res.statusCode = 400;
+					res.end(http.STATUS_CODES[400]);
 				}
 
 				if (data) {
-					logger.debug(httpreq, 'DATA: %j', data);
+					logger.debug(req, 'DATA: %j', data);
 
-					parseNotification(httpreq, data)
+					parseNotification(req, data)
 						.then(function() {
-							httpresp.end();
+							res.end();
 						})
 						.catch(function(error) {
-							logger.error(httpreq, error);
+							logger.error(req, error);
 
-							httpresp.statusCode = 500;
-							httpresp.end(http.STATUS_CODES[500]);
+							res.statusCode = 500;
+							res.end(http.STATUS_CODES[500]);
 						})
 						.done();
 				}
 			});
 
 		} else {
-			httpresp.statusCode = 405;
-			httpresp.end(http.STATUS_CODES[405]);
+			res.statusCode = 405;
+			res.end(http.STATUS_CODES[405]);
 		}
 	});
 
-getConfig()
-	.then(function(data) {
-		config = data;
+readFile(CONFIG_FILE, { encoding: 'utf8' }).then(function(contents) {
 
-		logger.debug(null, 'Listening on port %s.', config.port);
+	config = JSON.parse(contents);
 
-		server.listen(config.port);
-	})
-	.catch(function(err) {
-		logger.error(null, 'Unable to read config file. ERROR: %s', err);
-	})
-	.done();
+	// Initialize the gitlab API wrapper.
+	gitlab = new GitLab(config.gitlab_api_base_url, config.gitlab_api_token);
+
+	logger.debug(null, 'Listening on port %s.', config.port);
+
+	server.listen(config.port);
+}).catch(function(err) {
+	logger.error(null, 'Unable to read config file. ERROR: %s', err);
+});
 
 // ============================================================================================
-
-/**
- * Gets the configuration from the config file.
- * @returns {Q.Promise} A promise that will be resolved with the configuration data.
- */
-function getConfig() {
-	var deferred = Q.defer();
-
-	fs.readFile(CONFIG_FILE, { encoding: 'utf8' }, function(err, data) {
-		if (err) {
-			deferred.reject(err);
-		} else {
-			deferred.resolve(JSON.parse(data));
-		}
-	});
-
-	return deferred.promise;
-}
 
 /**
  * Parses the raw notification data from the GitLab webhook.
  * @param {Object} httpreq The HTTP request.
  * @param {Object} data The raw notification data.
- * @returns {Q.Promise} A promise that will be resolved when the data is processed.
+ * @returns {Promise} A promise that will be resolved when the data is processed.
  */
 function parseNotification(httpreq, data) {
-	var gitlab = new GitLab(config.gitlab_api_base_url, config.gitlab_api_token),
-		processed;
+	var processed;
 
 	if (data.object_kind) {
 		switch (data.object_kind) {
 			case 'issue':
-				processed = processIssue(httpreq, gitlab, data);
+				processed = processIssue(httpreq, data);
 				break;
 			case 'push':
 				var beforeZero = REGEX_ALL_ZEROES.test(data.before),
 					afterZero = REGEX_ALL_ZEROES.test(data.after);
 
 				if (beforeZero || afterZero) {
-					// If before or after is all zeroes, this is a new branch being pushed.
-					processed = processBranch(httpreq, gitlab, data, beforeZero, afterZero);
+					// If before or after is all zeroes, this is a branch being pushed.
+					processed = processBranch(httpreq, data, beforeZero, afterZero);
 				} else {
-					processed = processCommit(httpreq, gitlab, data);
+					processed = processCommit(httpreq, data);
 				}
 				break;
 			case 'tag_push':
-				processed = processTag(httpreq, gitlab, data);
+				processed = processTag(httpreq, data);
 				break;
 		}
 	}
@@ -138,59 +128,44 @@ function parseNotification(httpreq, data) {
 	return processed.then(function(response) {
 		if (!response) {
 			// If the processing resulted in nothing, it was probably ignored.
-			// Return a promise resolved with nothing.
-			return Q();
+			return;
 		}
 
-		var deferred = Q.defer();
-
-		request(
-			{
-				method: 'POST',
-				uri: config.slack_webhook_uri,
-				json: true,
-				body: response
-			},
-			function (error, response, body) {
-				processResponse('slack', error, response, body)
-					.then(function(response) {
-						deferred.resolve(response);
-					})
-					.catch(function(error) {
-						deferred.reject(error);
-					});
-			}
-		);
-
-		return deferred.promise;
+		return request({
+			method: 'POST',
+			uri: config.slack_webhook_url,
+			json: true,
+			body: response
+		}).catch(function (err) {
+			return processError('slack', err);
+		}).spread(function (response, body) {
+			return processResponse('slack', response, body);
+		});
 	});
 }
 
 /**
  * Processes an issue message.
  * @param {Object} httpreq      The HTTP request.
- * @param {GitLab} gitlab       An instance of the GitLab API wrapper.
  * @param {Object} issueData    The issue message data.
  * @returns {Q.Promise} A promise that will be resolved with the slack response.
  */
-function processIssue(httpreq, gitlab, issueData) {
+function processIssue(httpreq, issueData) {
 	var issueDetails = issueData.object_attributes;
 
 	if (issueDetails.action === 'update') {
 		// If this is a modify, ignore it. We don't want the spam.
 		// Return a promise resolved with nothing.
-		return Q();
+		return Promise.resolve();
 	}
 
 	logger.debug(httpreq, 'PROCESS: Issue');
 
-	return Q.spread(
-		[
-			gitlab.getProject(issueDetails.project_id),
-			gitlab.getUserById(issueDetails.author_id),
-			// Assignee can be null, so don't try to fetch details it if it is.
-			issueDetails.assignee_id ? gitlab.getUserById(issueDetails.assignee_id) : Q.resolve(null)
-		],
+	return Promise.join(
+		gitlab.getProject(issueDetails.project_id),
+		gitlab.getUserById(issueDetails.author_id),
+		// Assignee can be null, so don't try to fetch details it if it is.
+		issueDetails.assignee_id ? gitlab.getUserById(issueDetails.assignee_id) : Promise.resolve(null),
 		function(project, author, assignee) {
 			var channel = config.project_channel_map[project.id.toString()],
 				verb;
@@ -217,11 +192,11 @@ function processIssue(httpreq, gitlab, issueData) {
 				text;
 
 			if (assignee) {
-				assigneeName = util.format('<https://***REMOVED***/u/%s|%s>', assignee.username, assignee.username)
+				assigneeName = util.format('<https://git.lab.teralogics.com/u/%s|%s>', assignee.username, assignee.username);
 			}
 
 			text = util.format(
-				'[%s] issue #%s %s by <https://***REMOVED***/u/%s|%s> — *assignee:* %s — *creator:* <https://***REMOVED***/u/%s|%s>',
+				'[%s] issue #%s %s by <https://git.lab.teralogics.com/u/%s|%s> — *assignee:* %s — *creator:* <https://git.lab.teralogics.com/u/%s|%s>',
 				project.path,
 				issueDetails.iid,
 				verb,
@@ -231,6 +206,9 @@ function processIssue(httpreq, gitlab, issueData) {
 				author.username,
 				author.username
 			);
+
+			// reset the last index; global regex
+			REGEX_MARKDOWN_LINK.lastIndex = 0;
 
 			var response = {
 				text: text,
@@ -263,62 +241,55 @@ function processIssue(httpreq, gitlab, issueData) {
 /**
  * Processes a new branch message.
  * @param {Object} httpreq      The HTTP request.
- * @param {GitLab} gitlab       An instance of the GitLab API wrapper.
  * @param {Object} branchData   The branch message data.
  * @param {Boolean} beforeZero	Indicates whether the `before` hash is all zeroes.
  * @param {Boolean} afterZero	Indicates whether the `after` hash is all zeroes.
  * @returns {Q.Promise} A promise that will be resolved with the slack response.
  */
-function processBranch(httpreq, gitlab, branchData, beforeZero, afterZero) {
+function processBranch(httpreq, branchData, beforeZero, afterZero) {
 	logger.debug(httpreq, 'PROCESS: Branch');
 
-	var action;
+	var action = '[unknown]';
 
 	if (beforeZero) {
 		action = 'pushed new branch';
 	} else if (afterZero) {
 		action = 'deleted branch';
-	} else {
-		action = '[unknown]'
 	}
 
-	return Q.spread(
-		// Resolve the project ID and user ID to get more info.
-		[gitlab.getProject(branchData.project_id), gitlab.getUserById(branchData.user_id)],
-		function(project, user) {
-			var channel = config.project_channel_map[project.id.toString()],
-				branch = branchData.ref.substr(branchData.ref.lastIndexOf('/') + 1),
-				response = {
-					parse: 'none',
-					text: util.format(
-						'[%s] <https://***REMOVED***/u/%s|%s> %s <%s/tree/%s|%s>',
-						project.path,
-						user.username,
-						user.username,
-						action,
-						project.web_url,
-						branch,
-						branch
-					)
-				};
+	// Resolve the project ID and user ID to get more info.
+	return Promise.join(gitlab.getProject(branchData.project_id), gitlab.getUserById(branchData.user_id), function (project, user) {
+		var channel = config.project_channel_map[project.id.toString()],
+			branch = branchData.ref.substr(branchData.ref.lastIndexOf('/') + 1),
+			response = {
+				parse: 'none',
+				text: util.format(
+					'[%s] <https://git.lab.teralogics.com/u/%s|%s> %s <%s/tree/%s|%s>',
+					project.path,
+					user.username,
+					user.username,
+					action,
+					project.web_url,
+					branch,
+					branch
+				)
+			};
 
-			if (channel) {
-				response.channel = channel;
-			}
-
-			return response;
+		if (channel) {
+			response.channel = channel;
 		}
-	);
+
+		return response;
+	});
 }
 
 /**
  * Processes a commit message.
  * @param {Object} httpreq      The HTTP request.
- * @param {GitLab} gitlab       An instance of the GitLab API wrapper.
  * @param {Object} commitData   The commit message data.
- * @returns {Q.Promise} A promise that will be resolved with the slack response.
+ * @returns {Promise} A promise that will be resolved with the slack response.
  */
-function processCommit(httpreq, gitlab, commitData) {
+function processCommit(httpreq, commitData) {
 	logger.debug(httpreq, 'PROCESS: Commit');
 
 	// Resolve the project ID and user ID to get more info.
@@ -326,10 +297,17 @@ function processCommit(httpreq, gitlab, commitData) {
 
 	// Also resolve each commit's user by email address.
 	commitData.commits.forEach(function(c) {
-		calls.push(gitlab.searchUser(c.author.email));
+		calls.push(gitlab.searchUser(c.author.email).then(function (results) {
+			// Take the first matching result.
+			if (results.length > 0) {
+				return results[0];
+			} else {
+				return null;
+			}
+		}));
 	});
 
-	return Q.spread(calls, function(project, user) {
+	return Promise.all(calls).spread(function(project, user) {
 		var channel = config.project_channel_map[project.id.toString()],
 			attachment = {
 				color: '#317CB9',
@@ -338,48 +316,68 @@ function processCommit(httpreq, gitlab, commitData) {
 			response = {
 				parse: 'none',
 				text: util.format(
-					'[%s:%s] %s new commits by <https://***REMOVED***/u/%s|%s>:',
+					'[%s:%s] <https://git.lab.teralogics.com/u/%s|%s> pushed %s new commits:',
 					project.path,
 					commitData.ref.substr(commitData.ref.lastIndexOf('/') + 1),
-					commitData.total_commits_count,
 					user.username,
-					user.username
+					user.username,
+					commitData.total_commits_count
 				),
 				attachments: [attachment]
 			},
 			attachmentFallbacks = [],
-			attachmentTexts = [];
+			attachmentTexts = [],
+			// I'm not super worried about V8 optimization in this project.
+			commitUsers = Array.prototype.slice.call(arguments, 2);
 
-		for (var i = 0; i < commitData.commits.length; i++) {
-			var commit = commitData.commits[i],
-				commitUser = arguments[i + 2][0], // all parameters after the static ones are commit users
+		_.each(commitData.commits, function (commit, index) {
+			var commitUser = commitUsers[index], // all parameters after the static ones are commit users
 				commitUserName,
 				commitId = commit.id.substr(0, 8), // only the first 8 characters of the commit hash are needed
-				message = commit.message.split(/(?:\r\n|[\r\n])/)[0]; // only print the first line; support all line ending types
-
+				message = commit.message.split(/(?:\r\n|[\r\n])/)[0], // only print the first line; support all line ending types
+				issues = commit.message.match(REGEX_ISSUE_MENTION), // find all issue mentions
+				issuesSuffix = '';
 
 			if (commitUser) {
 				commitUserName = commitUser.username;
 			} else {
-				// If the user couldn't be resolved, use the email in its place.
+				// If the username couldn't be resolved, use the email in its place.
 				commitUserName = commit.author.email;
+			}
+
+			if (issues) {
+				// If there were issues, build the fallback suffix here.
+				issuesSuffix = ' (' + issues.join(', ') + ')';
 			}
 
 			attachmentFallbacks.push(util.format(
 				'[%s] %s: %s',
 				commitUserName,
 				commitId,
-				message
+				message + issuesSuffix
 			));
+
+			if (issues) {
+				// If there were issues, build the formatted suffix here.
+				issues = _.map(issues, function (issue) {
+					return util.format(
+						'<%s|%s>',
+						commitData.repository.homepage + '/issues/' + issue.substr(1),
+						issue
+					);
+				});
+
+				issuesSuffix = ' (' + issues.join(', ') + ')';
+			}
 
 			attachmentTexts.push(util.format(
 				'[%s] <%s|%s>: %s',
 				commitUserName,
 				commit.url,
 				commitId,
-				message
+				message + issuesSuffix
 			));
-		}
+		});
 
 		attachment.fallback = attachmentFallbacks.join('\n');
 		attachment.text = attachmentTexts.join('\n');
@@ -395,69 +393,62 @@ function processCommit(httpreq, gitlab, commitData) {
 /**
  * Processes a tag message.
  * @param {Object} httpreq The HTTP request.
- * @param {GitLab} gitlab An instance of the GitLab API wrapper.
  * @param {Object} tagData The tag message data.
- * @returns {Q.Promise} A promise that will be resolved with the slack response.
+ * @returns {Promise} A promise that will be resolved with the slack response.
  */
-function processTag(httpreq, gitlab, tagData) {
+function processTag(httpreq, tagData) {
 	logger.debug(httpreq, 'PROCESS: Tag');
 
 	// tags work like branches; before zero is add, after zero is delete
 	var beforeZero = REGEX_ALL_ZEROES.test(tagData.before),
 		afterZero = REGEX_ALL_ZEROES.test(tagData.after);
 
-	var action;
+	var action = '[unknown]';
 
 	if (beforeZero) {
 		action = 'pushed new tag';
 	} else if (afterZero) {
 		action = 'deleted tag';
-	} else {
-		action = '[unknown]'
 	}
 
-	return Q.spread(
-		// Resolve the project ID and user ID to get more info.
-		[gitlab.getProject(tagData.project_id), gitlab.getUserById(tagData.user_id)],
-		function(project, user) {
-			var channel = config.project_channel_map[project.id.toString()],
-				tag = tagData.ref.substr(tagData.ref.lastIndexOf('/') + 1),
-				response = {
-					text: util.format(
-						'[%s] <https://***REMOVED***/u/%s|%s> %s <%s/commits/%s|%s>',
-						project.path,
-						user.username,
-						user.username,
-						action,
-						project.web_url,
-						tag,
-						tag
-					)
-				};
+	// Resolve the project ID and user ID to get more info.
+	return Promise.join(gitlab.getProject(tagData.project_id), gitlab.getUserById(tagData.user_id), function (project, user) {
+		var channel = config.project_channel_map[project.id.toString()],
+			tag = tagData.ref.substr(tagData.ref.lastIndexOf('/') + 1),
+			response = {
+				text: util.format(
+					'[%s] <https://git.lab.teralogics.com/u/%s|%s> %s <%s/commits/%s|%s>',
+					project.path,
+					user.username,
+					user.username,
+					action,
+					project.web_url,
+					tag,
+					tag
+				)
+			};
 
-			if (channel) {
-				response.channel = channel;
-			}
-
-			return response;
+		if (channel) {
+			response.channel = channel;
 		}
-	);
+
+		return response;
+	});
 }
 
 /**
  * Processes an unrecognized message.
- * @param {Object} httpreq  The HTTP request.
- * @param {Object} data     The unrecognized data.
+ * @param {Object} httpreq The HTTP request.
+ * @param {Object} data The unrecognized data.
  * @returns {Q.Promise} A promise resolved with the unrecognized data.
  */
 function processUnrecognized(httpreq, data) {
 	logger.debug(httpreq, 'PROCESS: Unrecognized');
 
-	// Post anything unrecognized raw to a DM.
+	// Post anything unrecognized in raw to the webhook's default channel.
 	var dataString = JSON.stringify(data, null, 4),
 		response = {
 			parse: 'none',
-			channel: '@harwood',
 			attachments: [{
 				title: 'GitLab Webhook - Unrecognized Data',
 				fallback: dataString,
@@ -468,37 +459,43 @@ function processUnrecognized(httpreq, data) {
 		};
 
 	// just return a promise resolved with this value
-	return Q(response);
+	return Promise.resolve(response);
 }
 
 /**
- * Processes the response from a request.
- * @param {String} source               The response source.
- * @param {*} error                     The error.
- * @param {IncomingMessage} response    The response.
- * @param {String|Object} body          The response body.
- * @returns {Q.Promise} A promise resolved or rejected depending on the properties of the response.
+ * Processes the response from a request to determine if it is an error case.
+ * @param {String} source The response source.
+ * @param {IncomingMessage} response The response.
+ * @param {String|Object} body The response body.
+ * @returns {Promise} A promise resolved or rejected depending on the properties of the response.
  */
-function processResponse(source, error, response, body) {
-	var deferred = Q.defer();
+function processResponse(source, response, body) {
+	if (response.statusCode < 200 || response.statusCode > 299) {
+		var status = source.toUpperCase() + ': HTTP ' + response.statusCode + ' -- ';
 
-	if (error) {
-		deferred.reject(source.toUpperCase() + ': HTTP' + response.statusCode + ' -- ' + error);
-	} else if (response.statusCode < 200 || response.statusCode > 299) {
-		if (response.headers['content-length'] <= 250) {
+		if (body && response.headers['content-length'] <= 500) {
 			if (typeof(body) !== 'string') {
 				body = JSON.stringify(body);
 			}
 
-			deferred.reject(source.toUpperCase() + ': HTTP' + response.statusCode + ' -- ' + body);
+			status += body;
 		} else {
-			deferred.reject(source.toUpperCase() + ': HTTP' + response.statusCode + ' -- ' + http.STATUS_CODES[response.statusCode]);
+			status += http.STATUS_CODES[response.statusCode];
 		}
-	} else {
-		deferred.resolve(body);
-	}
 
-	return deferred.promise;
+		return Promise.reject(status);
+	} else {
+		return Promise.resolve(body);
+	}
+}
+
+/**
+ * Processes an error, preparing it for logging.
+ * @param {String} source The error source.
+ * @param {*} error The error.
+ */
+function processError(source, error) {
+	return Promise.reject(source.toUpperCase() + ': -- ' + (error.stack || error));
 }
 
 /**
@@ -512,17 +509,19 @@ function Logger(filename) {
 
 	/**
 	 * Writes an entry to the log file.
-	 * @param {String} level        The log level.
-	 * @param {Object} [httpreq]    The associated HTTP request.
-	 * @param {String} format       The log entry format.
-	 * @param {*...} args           The format arguments.
+	 * @param {String} level The log level.
+	 * @param {Object} httpreq The associated HTTP request.
+	 * @param {String} format The log entry format.
+	 * @param {*...} [args] The format arguments.
 	 */
 	this.log = function(level, httpreq, format, args) {
 		var formatArgs = [],
 			httpinfo = '';
 
 		for (var i = 2; i < arguments.length; i++) {
-			if (arguments[i]) formatArgs.push(arguments[i]);
+			if (arguments[i]) {
+				formatArgs.push(arguments[i]);
+			}
 		}
 
 		if (httpreq) {
@@ -542,9 +541,9 @@ function Logger(filename) {
 
 	/**
 	 * Writes a debug entry to the log file.
-	 * @param {Object} [httpreq]    The associated HTTP request.
-	 * @param {String} format       The log entry format.
-	 * @param {*...} args           The format arguments.
+	 * @param {Object} httpreq The associated HTTP request.
+	 * @param {String} format The log entry format.
+	 * @param {*...} [args] The format arguments.
 	 */
 	this.debug = function(httpreq, format, args) {
 		this.log('DEBUG', httpreq, format, args);
@@ -552,9 +551,9 @@ function Logger(filename) {
 
 	/**
 	 * Writes an error entry to the log file.
-	 * @param {Object} [httpreq]    The associated HTTP request.
-	 * @param {String} format       The log entry format.
-	 * @param {*...} args           The format arguments.
+	 * @param {Object} httpreq The associated HTTP request.
+	 * @param {String} format The log entry format.
+	 * @param {*...} [args] The format arguments.
 	 */
 	this.error = function(httpreq, format, args) {
 		this.log('ERROR', httpreq, format, args);
@@ -571,16 +570,16 @@ function GitLab(baseUrl, token) {
 	/**
 	 * Gets user information by ID.
 	 * @param {String|Number} id The user ID.
-	 * @returns {Q.Promise} A promise that will be resolved with the user information.
+	 * @returns {Promise} A promise that will be resolved with the user information.
 	 */
 	this.getUserById = function(id) {
-		return sendRequest('/users/:id'.replace(':id', id));
+		return sendRequest('/users/:id'.replace(':id', id.toString()));
 	};
 
 	/**
 	 * Searches for a user by email address.
 	 * @param {String} email User email address.
-	 * @returns {Q.Promise} A promise that will be resolved with a list of matching users.
+	 * @returns {Promise} A promise that will be resolved with a list of matching users.
 	 */
 	this.searchUser = function(email) {
 		return sendRequest('/users?search=' + email);
@@ -589,46 +588,47 @@ function GitLab(baseUrl, token) {
 	/**
 	 * Gets project information by ID.
 	 * @param {String|Number} id The project ID.
-	 * @returns {Q.Promise} A promise that will be resolved with the project information.
+	 * @returns {Promise} A promise that will be resolved with the project information.
 	 */
 	this.getProject = function(id) {
-		return sendRequest('/projects/:id'.replace(':id', id));
+		return sendRequest('/projects/:id'.replace(':id', id.toString()));
 	};
 
 	/**
 	 * Sends a request to the GitLab API.
-	 * @param {String} uri The URI.
+	 * @param {String} url The URL.
 	 * @param {String} [method] The HTTP method. Default = GET
-	 * @returns {Q.Promise} A promise that will be resolved with the response body.
+	 * @returns {Promise} A promise that will be resolved with the response body.
 	 */
-	function sendRequest(uri, method) {
-		var deferred = Q.defer();
-
+	function sendRequest(url, method) {
 		if (!method) {
 			method = 'GET';
 		}
 
-		request(
-			{
-				method: method,
-				uri: baseUrl + uri,
-				headers: {
-					'PRIVATE-TOKEN': token
-				},
-				json: true,
-				rejectUnauthorized: false
+		return request({
+			method: method,
+			uri: baseUrl + url,
+			headers: {
+				'PRIVATE-TOKEN': token
 			},
-			function (error, response, body) {
-				processResponse('gitlab', error, response, body)
-					.then(function(response) {
-						deferred.resolve(response);
-					})
-					.catch(function(error) {
-						deferred.reject(error);
-					});
-			}
-		);
-
-		return deferred.promise;
+			json: true,
+			rejectUnauthorized: false
+		}).catch(function (err) {
+			return processError('gitlab', err);
+		}).spread(function (response, body) {
+			return processResponse('gitlab', response, body);
+		});
 	}
 }
+
+// ===== TYPES =====
+
+/**
+ * GitLab/Slack configuration file.
+ * @typedef {Object} Configuration
+ * @property {String} slack_webhook_url The URL of the Slack incoming webhook.
+ * @property {String} gitlab_api_base_url The GitLab API base URL.
+ * @property {String} gitlab_api_token The GitLab API token to use for GitLab API requests.
+ * @property {Number} port The port on which to listen.
+ * @property {String} project_channel_map An object containing a mapping from GitLab project ID to Slack channel name.
+ */

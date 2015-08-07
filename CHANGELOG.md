@@ -1,3 +1,14 @@
+## 1.4.0 / 2015-08-07
+* Added .jshintrc and cleaned up JSHint issues.
+* Updated **request** module.
+* Migrated from **q** to **bluebird**.
+  * Broad cleanup and simplification of promises.
+* Minor changes in preparation for partitioning code.
+* Rephrased commit message to not imply ownership (Fixes #2).
+* Added issue mention summary for commit messages (Fixes #1).
+  * The entire commit message is searched for issue mentions. If found, they are appended to the first line in the notification.
+* Reworked request response/error processing (Fixes #4).
+
 ## 1.3.1 / 2015-03-31
 * Cleanup for initial push to GitHub.
 * Added MIT license.
