@@ -4,7 +4,10 @@
   * **Italic** -- `*|_` -> `_`
   * **Links/Images** -- `![T](U)|[T](U)` -> `<U|T>`    
     _Since there's no way to send more than one image with an attachment, images are simply converted into links._
-  * **Bullets** -- `*|  *` -> `•|\t•`
+  * **Bullets** -- `*|  *` -> `•|\t•`    
+    _Initial asterisks indented by one or more spaces are changed to be indented by a single tab._
+  * **Headings** -- `#... T` -> `*T*`    
+    _Headings are converted to bolded text._
 
 ## 1.4.0 / 2015-08-07
 * Added .jshintrc and cleaned up JSHint issues.
