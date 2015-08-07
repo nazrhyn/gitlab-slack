@@ -1,3 +1,11 @@
+## 1.5.0 / 2015-08-07
+* Added limited translation from Markdown to Slack-style formatting. Supported formatting:
+  * **Bold** -- `**|__` -> `*`
+  * **Italic** -- `*|_` -> `_`
+  * **Links/Images** -- `![T](U)|[T](U)` -> `<U|T>`    
+    _Since there's no way to send more than one image with an attachment, images are simply converted into links._
+  * **Bullets** -- `*|  *` -> `•|\t•`
+
 ## 1.4.0 / 2015-08-07
 * Added .jshintrc and cleaned up JSHint issues.
 * Updated **request** module.

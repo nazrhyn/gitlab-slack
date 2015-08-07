@@ -12,7 +12,11 @@ var readFile = Promise.promisify(fs.readFile),
 	LOG_FILE = 'gitlab-slack.log',
 	CONFIG_FILE = 'config.json',
 	REGEX_ALL_ZEROES = /^0+$/,
-	REGEX_MARKDOWN_LINK = /!?\[[^\]]*]\(([^)]+)\)/g,
+	REGEX_MARKDOWN_LINK = /!?\[([^\]]*)]\(([^)]+)\)/g,
+	REGEX_MARKDOWN_BOLD = /(\*\*|__)(.*?)\1/g,
+	REGEX_MARKDOWN_ITALIC = /(\*|_)(.*?)\1/g,
+	REGEX_MARKDOWN_BULLET = /^([ \t]+)?\*/mg,
+	REGEX_MARKDOWN_HEADER = /^#+(.+)$/mg,
 	REGEX_ISSUE_MENTION = /#\d+/g;
 
 process.on('uncaughtException', function(err) {
@@ -207,9 +211,6 @@ function processIssue(httpreq, issueData) {
 				author.username
 			);
 
-			// reset the last index; global regex
-			REGEX_MARKDOWN_LINK.lastIndex = 0;
-
 			var response = {
 				text: text,
 				attachments: [
@@ -222,7 +223,7 @@ function processIssue(httpreq, issueData) {
 						),
 						title: issueDetails.title.replace('<', '&lt;').replace('>', '&gt;'), // Allow people use < & > in their titles.
 						title_link: issueDetails.url,
-						text: issueDetails.description.replace(REGEX_MARKDOWN_LINK, '$1'), // Remove markdown links so that slack can just auto-linkify them.
+						text: formatIssueDescription(issueDetails.description),
 						color: '#F28A2B',
 						mrkdwn_in: ['title', 'text']
 					}
@@ -236,6 +237,23 @@ function processIssue(httpreq, issueData) {
 			return response;
 		}
 	);
+}
+
+/**
+ * Converts Markdown links, bullets, bold and italic to Slack style formatting.
+ * @param {String} description The description.
+ * @returns {String} The formatted description.
+ */
+function formatIssueDescription(description) {
+	return description
+		.replace(REGEX_MARKDOWN_BULLET, function (match, indent) {
+			// If the indent is present, replace it with a tab.
+			return (indent ? '\t' : '') + '•';
+		})
+		.replace(REGEX_MARKDOWN_LINK, '<$2|$1>')
+		.replace(REGEX_MARKDOWN_BOLD, '*$2*')
+		.replace(REGEX_MARKDOWN_ITALIC, '_$2_')
+		.replace(REGEX_MARKDOWN_HEADER, '*$1*');
 }
 
 /**
