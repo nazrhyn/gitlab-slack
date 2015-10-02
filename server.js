@@ -17,7 +17,8 @@ var readFile = Promise.promisify(fs.readFile),
 	REGEX_MARKDOWN_ITALIC = /(\*|_)(.*?)\1/g,
 	REGEX_MARKDOWN_BULLET = /^([ \t]+)?\*/mg,
 	REGEX_MARKDOWN_HEADER = /^#+(.+)$/mg,
-	REGEX_ISSUE_MENTION = /#\d+/g;
+	REGEX_ISSUE_MENTION = /#\d+/g,
+	ISSUE_BATCH_FETCH_STEP = 10;
 
 process.on('uncaughtException', function(err) {
 	// Make sure we at least know what blew up before we quit.
@@ -25,11 +26,10 @@ process.on('uncaughtException', function(err) {
 	process.exit(1);
 });
 
-/**
- * @type {Configuration}
- */
 var config,
 	gitlab,
+	labelCache = {},
+	issueCache = {},
 	logger = new Logger(LOG_FILE),
 	server = http.createServer(function(req, res) {
 		logger.debug(req, 'Request received.');
@@ -78,21 +78,133 @@ var config,
 		}
 	});
 
-readFile(CONFIG_FILE, { encoding: 'utf8' }).then(function(contents) {
-
+// I'd like more specific error messages, so that's why the interstitial catches.
+readFile(CONFIG_FILE, { encoding: 'utf8' }).catch(function(err) {
+	logger.error(null, 'Unable to read config file. ERROR: %s', err.stack || err);
+	throw err;
+}).then(function(contents) {
 	config = JSON.parse(contents);
 
+	// Pre-compile all of the label regexes.
+	_.each(config.gitlab.projects, function (project) {
+		_.each(project.labels, function (label, index) {
+			project.labels[index] = new RegExp(label, "i"); // It's good to be insensitive.
+		});
+	});
+
 	// Initialize the gitlab API wrapper.
-	gitlab = new GitLab(config.gitlab_api_base_url, config.gitlab_api_token);
+	gitlab = new GitLab(config.gitlab.baseUrl, config.gitlab.api.token);
+}).catch(function (err) {
+	logger.error(null, 'Unable to parse config file. ERROR: %s', err.stack || err);
+	throw err;
+}).then(function () {
+	return buildIssueLabelCache();
+}).catch(function (err) {
+	logger.error(null, 'Unable to build issue/label cache. ERROR: %s', err.stack || err);
+	throw err;
+}).then(function () {
+	 logger.debug(null, 'Listening on port %s.', config.port);
 
-	logger.debug(null, 'Listening on port %s.', config.port);
-
-	server.listen(config.port);
-}).catch(function(err) {
-	logger.error(null, 'Unable to read config file. ERROR: %s', err);
+	 server.listen(config.port);
+}).catch(function (err) {
+	logger.error(null, 'Unable to start service. ERROR: %s', err.stack || err);
 });
 
 // ============================================================================================
+
+/**
+ * Builds the issue/label cache for each configured project.
+ */
+function buildIssueLabelCache() {
+	var projectCachers = [];
+
+	_.each(config.gitlab.projects, function (project, projectId) {
+		if (_.size(project.labels) > 0) {
+			// Only cache for projects that have tracked labels defined.
+			logger.debug(null, '[CACHE] Caching information for project %s...', projectId);
+
+			// promise.bind(...) can't be used for state, here, due to the discontinuities in the
+			//  promise "recursion" that's used to "loop" through all of the cacheable items.
+			//  An IIFE will protect the project cache objects from modification after closure.
+			var cacher = (function (projectLabels, projectIssues) {
+				return gitlab.getLabels(projectId).then(function (labels) {
+					var count = 0;
+
+					// Cache only the labels that match the configured label patterns.
+					_.chain(labels).filter(function (label) {
+						return _.any(project.labels, function (pattern) {
+							return pattern.test(label.name);
+						});
+					}).each(function (label) {
+						projectLabels[label.name] = label.color;
+						count++;
+					});
+
+					logger.debug(null, '[CACHE][%s] Cached %s labels.', projectId, count);
+
+					return cacheProjectIssues(projectIssues, projectId, 1);
+				}).then(function () {
+					logger.debug(null, '[CACHE][%s] Discovered %s open issues.', projectId, _.keys(projectIssues).length);
+
+					return cacheIssueLabels(projectIssues, projectId, 0);
+				}).then(function () {
+					logger.debug(null, '[CACHE][%s] Cached all issue label information.', projectId);
+				});
+			})(labelCache[projectId] = {}, issueCache[projectId] = {});
+			// It's only somewhat evil to exploit assignment associativity to pass these...
+			//  ...it saves an identifier, amirite?
+
+			projectCachers.push(cacher);
+		}
+	});
+
+	return Promise.all(projectCachers);
+}
+
+/**
+ * Gets all of the issues for the specified project and caches them.
+ * @param {Object} issueCache The issues cache for this project.
+ * @param {Number} projectId The project ID.
+ * @param {Number} page The page.
+ * @returns {Promise} A promise that will be resolved when all project issues are cached.
+ */
+function cacheProjectIssues(issueCache, projectId, page) {
+	return gitlab.getIssues(projectId, page).each(function (issue) {
+		issueCache[issue.id] = true;
+	}).then(function (issues) {
+		if (issues.length > 0) {
+			return cacheProjectIssues(issueCache, projectId, ++page);
+		}
+	});
+}
+
+/**
+ * Gets the details for each of the issues in the cache and stores their label information.
+ * @param {Object} issueCache The issues cache for this project.
+ * @param {Number} projectId The project ID.
+ * @param {Number} start The offset within the cache at which to start fetching.
+ * @returns {Promise} A promise that will be resolved when all issue label information is cached.
+ */
+function cacheIssueLabels(issueCache, projectId, start) {
+	// Get a batch of issue IDs from `start` to `start + STEP_SIZE`.
+	var batch = _.chain(issueCache).keys().rest(start).first(ISSUE_BATCH_FETCH_STEP).value();
+
+	if (batch.length > 0) {
+		var gets = [];
+
+		_.each(batch, function (issueId) {
+			gets.push(gitlab.getIssue(projectId, issueId));
+		});
+
+		return Promise.all(gets).each(function (issue) {
+			issueCache[issue.id] = issue.labels;
+		}).then(function () {
+			return cacheIssueLabels(issueCache, projectId, start + ISSUE_BATCH_FETCH_STEP);
+		});
+	}
+
+	return Promise.resolve();
+}
 
 /**
  * Parses the raw notification data from the GitLab webhook.
@@ -137,7 +249,7 @@ function parseNotification(httpreq, data) {
 
 		return request({
 			method: 'POST',
-			uri: config.slack_webhook_url,
+			uri: config.slackWebhookUrl,
 			json: true,
 			body: response
 		}).catch(function (err) {
@@ -157,21 +269,18 @@ function parseNotification(httpreq, data) {
 function processIssue(httpreq, issueData) {
 	var issueDetails = issueData.object_attributes;
 
-	if (issueDetails.action === 'update') {
-		// If this is a modify, ignore it. We don't want the spam.
-		// Return a promise resolved with nothing.
-		return Promise.resolve();
-	}
-
 	logger.debug(httpreq, 'PROCESS: Issue');
 
 	return Promise.join(
 		gitlab.getProject(issueDetails.project_id),
 		gitlab.getUserById(issueDetails.author_id),
+		gitlab.getIssue(issueDetails.project_id, issueDetails.id),
 		// Assignee can be null, so don't try to fetch details it if it is.
 		issueDetails.assignee_id ? gitlab.getUserById(issueDetails.assignee_id) : Promise.resolve(null),
-		function(project, author, assignee) {
-			var channel = config.project_channel_map[project.id.toString()],
+		function(project, author, issue, assignee) {
+			var projectId = project.id.toString(),
+				projectConfig = config.gitlab.projects[projectId],
+				channel = projectConfig.channel,
 				verb;
 
 			switch (issueDetails.action) {
@@ -192,43 +301,94 @@ function processIssue(httpreq, issueData) {
 					break;
 			}
 
+			var projectIssues = issueCache[projectId],
+				projectLabels = labelCache[projectId],
+				addedLabels,
+				removedLabels;
+
+			if (_.size(projectConfig.labels) > 0 && ['open', 'reopen', 'update'].indexOf(issueDetails.action) !== -1) {
+				// If this is open, reopen or update and there are labels tracked for this project,
+				//  make sure we care about it before we do anything else.
+
+				addedLabels = _.chain(issue.labels) // Difference between the new label set...
+					.difference(projectIssues[issue.id]) // ...and the old label set...
+					.intersection(_.keys(projectLabels)) // ...intersected with what we care about.
+					.value();
+
+				// Same as above but as old diff. new.
+				removedLabels = _.chain(projectIssues[issue.id])
+					.difference(issue.labels)
+					.intersection(_.keys(projectLabels))
+					.value();
+
+				if (issueDetails.action === 'update' && _.size(addedLabels) + _.size(removedLabels) === 0) {
+					// If there is no label difference for an update, we do not continue.
+					return;
+				}
+			}
+
 			var assigneeName = '_none_',
 				text;
 
 			if (assignee) {
-				assigneeName = util.format('<https://git.lab.teralogics.com/u/%s|%s>', assignee.username, assignee.username);
+				assigneeName = util.format('<%s/u/%s|%s>', config.gitlab.baseUrl, assignee.username, assignee.username);
 			}
 
 			text = util.format(
-				'[%s] issue #%s %s by <https://git.lab.teralogics.com/u/%s|%s> — *assignee:* %s — *creator:* <https://git.lab.teralogics.com/u/%s|%s>',
+				'[%s] issue #%s %s by <%s/u/%s|%s> — *assignee:* %s — *creator:* <%s/u/%s|%s>',
 				project.path,
 				issueDetails.iid,
 				verb,
+				config.gitlab.baseUrl,
 				issueData.user.username,
 				issueData.user.username,
 				assigneeName,
+				config.gitlab.baseUrl,
 				author.username,
 				author.username
 			);
 
 			var response = {
-				text: text,
-				attachments: [
-					{
-						fallback: util.format(
-							'#%s %s\n%s',
-							issueDetails.iid,
-							issueDetails.title,
-							issueDetails.description
-						),
-						title: issueDetails.title.replace('<', '&lt;').replace('>', '&gt;'), // Allow people use < & > in their titles.
-						title_link: issueDetails.url,
-						text: formatIssueDescription(issueDetails.description),
-						color: '#F28A2B',
-						mrkdwn_in: ['title', 'text']
-					}
-				]
-			};
+					text: text,
+					attachments: []
+				},
+				mainAttachment = {
+					fallback: util.format(
+						'#%s %s',
+						issueDetails.iid,
+						issueDetails.title
+					),
+					title: issueDetails.title.replace('<', '&lt;').replace('>', '&gt;'), // Allow people use < & > in their titles.
+					title_link: issueDetails.url,
+					color: '#F28A2B',
+					mrkdwn_in: ['title', 'text']
+				};
+
+			// Add the main attachment; all action types include some form of this.
+			response.attachments.push(mainAttachment);
+
+			switch (issueDetails.action) {
+				case 'open':
+				case 'reopen':
+					// For open or re-open, we start with an empty cache; all labels are newly added.
+					projectIssues[issue.id] = [];
+
+					// Also, open and re-open are the only ones that get the full issue description.
+					mainAttachment.fallback += '\n' + issueDetails.description;
+					mainAttachment.text = formatIssueDescription(issueDetails.description);
+					/* falls through */
+				case 'update':
+					addLabelChangeAttachments(projectLabels, response.attachments, 'Added', addedLabels);
+					addLabelChangeAttachments(projectLabels, response.attachments, 'Removed', removedLabels);
+
+					// Now, update the cache to the current state of affairs.
+					projectIssues[issue.id] = issue.labels;
+					break;
+				case 'close':
+					// When issues are closed, we remove them from the cache.
+					delete projectIssues[issue.id];
+					break;
+			}
 
 			if (channel) {
 				response.channel = channel;
@@ -237,6 +397,24 @@ function processIssue(httpreq, issueData) {
 			return response;
 		}
 	);
+}
+
+/**
+ * Adds an attachment for each of the labels.
+ * @param {Object} projectLabels The label-to-color map for the project.
+ * @param {Array} attachments The attachments array.
+ * @param {String} action The action.
+ * @param {String[]} labels The labels.
+ */
+function addLabelChangeAttachments(projectLabels, attachments, action, labels) {
+	_.each(labels, function (label) {
+		attachments.push({
+			fallback: util.format('%s label %s', action, label),
+			text: util.format('_%s_ label *%s*', action, label),
+			color: projectLabels[label],
+			mrkdwn_in: ['text']
+		});
+	});
 }
 
 /**
@@ -277,13 +455,14 @@ function processBranch(httpreq, branchData, beforeZero, afterZero) {
 
 	// Resolve the project ID and user ID to get more info.
 	return Promise.join(gitlab.getProject(branchData.project_id), gitlab.getUserById(branchData.user_id), function (project, user) {
-		var channel = config.project_channel_map[project.id.toString()],
+		var channel = config.gitlab.projects[project.id.toString()].channel,
 			branch = branchData.ref.substr(branchData.ref.lastIndexOf('/') + 1),
 			response = {
 				parse: 'none',
 				text: util.format(
-					'[%s] <https://git.lab.teralogics.com/u/%s|%s> %s <%s/tree/%s|%s>',
+					'[%s] <%s/u/%s|%s> %s <%s/tree/%s|%s>',
 					project.path,
+					config.gitlab.baseUrl,
 					user.username,
 					user.username,
 					action,
@@ -315,18 +494,19 @@ function processCommit(httpreq, commitData) {
 
 	// Also resolve each commit's user by email address.
 	commitData.commits.forEach(function(c) {
-		calls.push(gitlab.searchUser(c.author.email).then(function (results) {
-			// Take the first matching result.
-			if (results.length > 0) {
-				return results[0];
-			} else {
-				return null;
-			}
+		var email = c.author.email.toLowerCase();
+
+		calls.push(gitlab.searchUser(email).then(function (results) {
+			// The user search will do a partial match, so make sure we get the right user.
+			//  e.g. smith@a.com -> smith@a.com, highsmith@a.com
+			return _.find(results, function (user) {
+				return email === user.email.toLowerCase();
+			}) || null;
 		}));
 	});
 
 	return Promise.all(calls).spread(function(project, user) {
-		var channel = config.project_channel_map[project.id.toString()],
+		var channel = config.gitlab.projects[project.id.toString()].channel,
 			attachment = {
 				color: '#317CB9',
 				mrkdwn_in: ['text']
@@ -334,9 +514,10 @@ function processCommit(httpreq, commitData) {
 			response = {
 				parse: 'none',
 				text: util.format(
-					'[%s:%s] <https://git.lab.teralogics.com/u/%s|%s> pushed %s new commits:',
+					'[%s:%s] <%s/u/%s|%s> pushed %s new commits:',
 					project.path,
 					commitData.ref.substr(commitData.ref.lastIndexOf('/') + 1),
+					config.gitlab.baseUrl,
 					user.username,
 					user.username,
 					commitData.total_commits_count
@@ -431,12 +612,13 @@ function processTag(httpreq, tagData) {
 
 	// Resolve the project ID and user ID to get more info.
 	return Promise.join(gitlab.getProject(tagData.project_id), gitlab.getUserById(tagData.user_id), function (project, user) {
-		var channel = config.project_channel_map[project.id.toString()],
+		var channel = config.gitlab.projects[project.id.toString()].channel,
 			tag = tagData.ref.substr(tagData.ref.lastIndexOf('/') + 1),
 			response = {
 				text: util.format(
-					'[%s] <https://git.lab.teralogics.com/u/%s|%s> %s <%s/commits/%s|%s>',
+					'[%s] <%s/u/%s|%s> %s <%s/commits/%s|%s>',
 					project.path,
+					config.gitlab.baseUrl,
 					user.username,
 					user.username,
 					action,
@@ -533,14 +715,7 @@ function Logger(filename) {
 	 * @param {*...} [args] The format arguments.
 	 */
 	this.log = function(level, httpreq, format, args) {
-		var formatArgs = [],
-			httpinfo = '';
-
-		for (var i = 2; i < arguments.length; i++) {
-			if (arguments[i]) {
-				formatArgs.push(arguments[i]);
-			}
-		}
+		var httpinfo = '';
 
 		if (httpreq) {
 			httpinfo = util.format(FORMAT_HTTP_INFO, httpreq.connection.remoteAddress, httpreq.method);
@@ -551,7 +726,7 @@ function Logger(filename) {
 			new Date().toISOString(),
 			level.toUpperCase(),
 			httpinfo,
-			util.format.apply(this, formatArgs)
+			util.format.apply(this, Array.prototype.slice.call(arguments, 2))
 		);
 
 		fs.appendFile(filename, entry);
@@ -564,7 +739,7 @@ function Logger(filename) {
 	 * @param {*...} [args] The format arguments.
 	 */
 	this.debug = function(httpreq, format, args) {
-		this.log('DEBUG', httpreq, format, args);
+		this.log.apply(this, ['DEBUG'].concat(Array.prototype.slice.call(arguments)));
 	};
 
 	/**
@@ -574,7 +749,7 @@ function Logger(filename) {
 	 * @param {*...} [args] The format arguments.
 	 */
 	this.error = function(httpreq, format, args) {
-		this.log('ERROR', httpreq, format, args);
+		this.log.apply(this, ['ERROR'].concat(Array.prototype.slice.call(arguments)));
 	};
 }
 
@@ -585,6 +760,9 @@ function Logger(filename) {
  * @constructor
  */
 function GitLab(baseUrl, token) {
+	// Add the API path prefix to the GitLab base URL.
+	baseUrl = baseUrl + config.gitlab.api.basePath;
+
 	/**
 	 * Gets user information by ID.
 	 * @param {String|Number} id The user ID.
@@ -600,7 +778,9 @@ function GitLab(baseUrl, token) {
 	 * @returns {Promise} A promise that will be resolved with a list of matching users.
 	 */
 	this.searchUser = function(email) {
-		return sendRequest('/users?search=' + email);
+		return sendRequest('/users', {
+			search: email
+		});
 	};
 
 	/**
@@ -613,19 +793,73 @@ function GitLab(baseUrl, token) {
 	};
 
 	/**
+	 * Gets issues for a project.
+	 * @param {Number} projectId The project ID.
+	 * @param {String} [state] The state.
+	 * @param {Number} [page] The page. Default = opened
+	 * @returns {Promise} A promise that will be resolved with project issues.
+	 */
+	this.getIssues = function (projectId, state, page) {
+		if (_.isNumber(state)) {
+			page = state;
+			state = undefined;
+		}
+
+		if (!state) {
+			state = 'opened';
+		}
+
+		return sendRequest('/projects/:id/issues'.replace(':id', projectId.toString()), {
+			state: state,
+			page: page,
+			per_page: 50
+		});
+	};
+
+	/**
+	 * Gets an issue.
+	 * @param {Number} projectId The project ID.
+	 * @param {Number} issueId The issue ID.
+	 * @returns {Promise} A promise that will be resolved with the issue.
+	 */
+	this.getIssue = function (projectId, issueId) {
+		return sendRequest('/projects/:pid/issues/:iid'.replace(':pid', projectId.toString()).replace(':iid', issueId.toString()));
+	};
+
+	/**
+	 * Gets the labels for a project.
+	 * @param {Number} projectId The project ID.
+	 * @returns {Promise} A promise that will be resolved with project labels.
+	 */
+	this.getLabels = function (projectId) {
+		return sendRequest('/projects/:id/labels'.replace(':id', projectId.toString()));
+	};
+
+	/**
 	 * Sends a request to the GitLab API.
 	 * @param {String} url The URL.
 	 * @param {String} [method] The HTTP method. Default = GET
+	 * @param {Object} [qs] The query string parameters.
 	 * @returns {Promise} A promise that will be resolved with the response body.
 	 */
-	function sendRequest(url, method) {
+	function sendRequest(url, method, qs) {
+		if (_.isObject(method)) {
+			qs = method;
+			method = undefined;
+		}
+
 		if (!method) {
 			method = 'GET';
+		}
+
+		if (!qs) {
+			qs = {};
 		}
 
 		return request({
 			method: method,
 			uri: baseUrl + url,
+			qs: qs,
 			headers: {
 				'PRIVATE-TOKEN': token
 			},
@@ -638,15 +872,3 @@ function GitLab(baseUrl, token) {
 		});
 	}
 }
-
-// ===== TYPES =====
-
-/**
- * GitLab/Slack configuration file.
- * @typedef {Object} Configuration
- * @property {String} slack_webhook_url The URL of the Slack incoming webhook.
- * @property {String} gitlab_api_base_url The GitLab API base URL.
- * @property {String} gitlab_api_token The GitLab API token to use for GitLab API requests.
- * @property {Number} port The port on which to listen.
- * @property {String} project_channel_map An object containing a mapping from GitLab project ID to Slack channel name.
- */

@@ -1,7 +1,12 @@
 {
-	"slack_webhook_url": "",
-	"gitlab_api_base_url": "",
-	"gitlab_api_token": "",
 	"port": 21012,
-	"project_channel_map": {}
+	"slackWebhookUrl": "",
+	"gitlab": {
+		"baseUrl": "",
+		"api": {
+			"basePath": "/api/v3",
+			"token": ""
+		},
+		"projects": {}
+	}
 }
