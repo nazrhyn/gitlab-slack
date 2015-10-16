@@ -251,8 +251,8 @@ function formatIssueDescription(description) {
 			return (indent ? '\t' : '') + '•';
 		})
 		.replace(REGEX_MARKDOWN_LINK, '<$2|$1>')
-		.replace(REGEX_MARKDOWN_BOLD, '*$2*')
 		.replace(REGEX_MARKDOWN_ITALIC, '_$2_')
+		.replace(REGEX_MARKDOWN_BOLD, '*$2*')
 		.replace(REGEX_MARKDOWN_HEADER, '*$1*');
 }
 
