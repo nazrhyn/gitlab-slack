@@ -6,7 +6,7 @@
 * Provides Translation from Markdown to Slack formatting syntax for the formatting features that Slack supports. ([more info](#markdown-to-slack-formatting-translation))
 * Issues mentioned anywhere in the commit message are aggregated and provided as links to the right of the commit summary line. ([more info](#issue-mention-summary))
 * Status and error messages are logged to `gitlab-slack.log` in the application directory.
-* Changes to tracked labels on issues are notified as issue updates with a summary of label changes as attachments. ([more info](#issue-change-tracking))
+* Changes to tracked labels on issues are notified as issue updates with a summary of label changes as attachments. ([more info](#issue-label-change-tracking))
 
 ### Configuration Syntax
 **gitlab-slack** is configured by values in the `config.json` file. This file is expected to be in the application
@@ -53,7 +53,7 @@ directory. The configuration file has the following structure:
 # Feature Details
 
 ### Attractive and Functional Notifications
-**gitlab-slack** improves upon GitLab's built-in Slack integration with attractive notification formating that provides more detail and functionality
+**gitlab-slack** improves upon GitLab's built-in Slack integration with attractive notification formatting that provides more detail and functionality
 while cutting the fat and remaining as concise as possible.
  
 #### Commits
@@ -118,13 +118,13 @@ An issue titled **Markdown to Slack formatting is awesome** with the following f
 ...produces an issue notification similiar to the following...    
 ![Markdown to Slack Formatting](https://cloud.githubusercontent.com/assets/1672405/10584587/06ea78f0-7661-11e5-81ad-0abf07d15cc1.png)
 
-### Issue Change Tracking
+### Issue Label Change Tracking
 For configured projects, label change tracking can be enabled by providing a list of regular expressions defining which labels
 **gitlab-slack** should be interested in. When enabled, label changes will be notified in additional attachments following the
 main summary attachment. Each label attachment will follow the label's configured color and indicate whether the label was
 _Added_ or _Removed_.
 
-![Issue Change Tracking](https://cloud.githubusercontent.com/assets/1672405/10585795/1f8c8762-7667-11e5-8f31-0725e81d5b9c.png)
+![Issue Label Change Tracking](https://cloud.githubusercontent.com/assets/1672405/10585795/1f8c8762-7667-11e5-8f31-0725e81d5b9c.png)
 
 # Installation
 **nodejs** and **npm** are prerequisites to the installation of this application.
