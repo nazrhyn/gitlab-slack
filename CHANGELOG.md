@@ -2,8 +2,8 @@
 * Added feature information to the README file. See this file for more information on this version's changes.
 * Added issue label tracking (Fixes #7).
 * Significantly changed the structure of the **config.json** file.
-* Fixed issue with user resolution of similarly-named users (Fixes #5)
-* Removed remaining hard-coded URLs (Fixes #8)
+* Fixed issue with user resolution of similarly-named users (Fixes #5).
+* Removed remaining hard-coded URLs (Fixes #8).
 
 ## 1.5.0 / 2015-08-07
 * Added limited translation from Markdown to Slack-style formatting. Supported formatting:
