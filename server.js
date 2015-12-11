@@ -276,9 +276,11 @@ function processIssue(httpreq, issueData) {
 		gitlab.getProject(issueDetails.project_id),
 		gitlab.getUserById(issueDetails.author_id),
 		gitlab.getIssue(issueDetails.project_id, issueDetails.id),
-		// Assignee can be null, so don't try to fetch details it if it is.
+		// Milestone can be null, so don't try to fetch details if it is.
+		issueDetails.milestone_id ? gitlab.getMilestone(issueDetails.project_id, issueDetails.milestone_id) : Promise.resolve(null),
+		// Assignee can be null, so don't try to fetch details if it is.
 		issueDetails.assignee_id ? gitlab.getUserById(issueDetails.assignee_id) : Promise.resolve(null),
-		function(project, author, issue, assignee) {
+		function(project, author, issue, milestone, assignee) {
 			var projectId = project.id.toString(),
 				projectConfig = config.gitlab.projects[projectId],
 				projectLabelsTracked = !!projectConfig && _.size(projectConfig.labels) > 0,
@@ -329,14 +331,19 @@ function processIssue(httpreq, issueData) {
 			}
 
 			var assigneeName = '_none_',
+				milestoneName = '_none_',
 				text;
 
 			if (assignee) {
 				assigneeName = util.format('<%s/u/%s|%s>', config.gitlab.baseUrl, assignee.username, assignee.username);
 			}
 
+			if (milestone) {
+				milestoneName = util.format('<%s/milestones/%s|%s>', project.web_url, milestone.iid, milestone.title);
+			}
+
 			text = util.format(
-				'[%s] issue #%s %s by <%s/u/%s|%s> — *assignee:* %s — *creator:* <%s/u/%s|%s>',
+				'[%s] issue #%s %s by <%s/u/%s|%s> — *assignee:* %s — *milestone:* %s — *creator:* <%s/u/%s|%s>',
 				project.path,
 				issueDetails.iid,
 				verb,
@@ -344,6 +351,7 @@ function processIssue(httpreq, issueData) {
 				issueData.user.username,
 				issueData.user.username,
 				assigneeName,
+				milestoneName,
 				config.gitlab.baseUrl,
 				author.username,
 				author.username
@@ -849,7 +857,11 @@ function GitLab(baseUrl, token) {
 	 * @returns {Promise} A promise that will be resolved with the issue.
 	 */
 	this.getIssue = function (projectId, issueId) {
-		return sendRequest('/projects/:pid/issues/:iid'.replace(':pid', projectId.toString()).replace(':iid', issueId.toString()));
+		return sendRequest(
+			'/projects/:pid/issues/:iid'
+				.replace(':pid', projectId.toString())
+				.replace(':iid', issueId.toString())
+		);
 	};
 
 	/**
@@ -859,6 +871,20 @@ function GitLab(baseUrl, token) {
 	 */
 	this.getLabels = function (projectId) {
 		return sendRequest('/projects/:id/labels'.replace(':id', projectId.toString()));
+	};
+
+	/**
+	 * Gets a milestone.
+	 * @param {Number} projectId The project ID.
+	 * @param {Number} milestoneId The milestone ID.
+	 * @returns {Promise} A promise that will be resolved with the milestone.
+	 */
+	this.getMilestone = function (projectId, milestoneId) {
+		return sendRequest(
+			'/projects/:pid/milestones/:mid'
+				.replace(':pid', projectId.toString())
+				.replace(':mid', milestoneId.toString())
+		);
 	};
 
 	/**
