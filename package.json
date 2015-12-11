@@ -1,21 +1,21 @@
 {
-	"name": "gitlab-slack",
-	"version": "1.6.0",
-	"description": "A service that receives hook notifications from GitLab and posts information to an incoming webhook on Slack.",
-	"author": "Chris Harwood",
-	"license": "MIT",
-	"main": "server.js",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/nazrhyn/gitlab-slack.git"
-	},
-	"dependencies": {
-		"bluebird": "^2.10.2",
-		"request": "^2.65.0",
-		"underscore": "^1.8.3"
-	},
-	"devDependencies": {},
-	"scripts": {
-		"start": "node server.js"
-	}
+  "name": "gitlab-slack",
+  "version": "1.6.0",
+  "description": "A service that receives hook notifications from GitLab and posts information to an incoming webhook on Slack.",
+  "author": "Chris Harwood",
+  "license": "MIT",
+  "main": "server.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nazrhyn/gitlab-slack.git"
+  },
+  "dependencies": {
+    "bluebird": "^3.0.6",
+    "request-promise": "^1.0.2",
+    "underscore": "^1.8.3"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "start": "node server.js"
+  }
 }

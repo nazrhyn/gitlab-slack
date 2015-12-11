@@ -68,11 +68,12 @@ Tag and branch notifications include the repository name, the username of the us
 tag name as a link. All commit information for branch creation is discarded as those commits would have already been notified when they were made.
 
 #### Issues
-![Issue Notifications](https://cloud.githubusercontent.com/assets/1672405/10584895/9e8fe306-7662-11e5-918c-bf2d8452576e.png)    
+![Issue Notifications](https://cloud.githubusercontent.com/assets/1672405/11752780/5c44b8ec-a00f-11e5-9d53-a6aa87bdd2f9.png)    
 Issue notifications include the repository name, the username of the user performed the issue action, the username of the user to
-whom the issues is assigned and the username of the user who created the issue. Each username is formatted as a link. Issue notifications
-include a main attachment that includes the title of the issue, as a link, and, depending on the kind of action, also the issue
-description. Additional attachments will be included for changes to tracked labels. ([more info](#issue-label-tracking))
+whom the issues is assigned, the milestone to which the issue is assigned and the username of the user who created the issue.
+Milestones and usernames are formatted as a link. Issue notifications include a main attachment that includes the title of the issue,
+as a link, and, depending on the kind of action, also the issue description. Additional attachments will be included for changes
+to tracked labels. ([more info](#issue-label-tracking))
 
 ### Issue Mention Summary
 As commit messages are truncated to their first line for notification, any issues mentioned elsewhere in the message are
@@ -116,7 +117,7 @@ An issue titled **Markdown to Slack formatting is awesome** with the following f
 * Back to the base level.
 ```
 ...produces an issue notification similiar to the following...    
-![Markdown to Slack Formatting](https://cloud.githubusercontent.com/assets/1672405/10584587/06ea78f0-7661-11e5-81ad-0abf07d15cc1.png)
+![Markdown to Slack Formatting](https://cloud.githubusercontent.com/assets/1672405/11752828/abd385d2-a00f-11e5-9bea-40861304eec4.png)
 
 ### Issue Label Change Tracking
 For configured projects, label change tracking can be enabled by providing a list of regular expressions defining which labels
@@ -124,33 +125,22 @@ For configured projects, label change tracking can be enabled by providing a lis
 main summary attachment. Each label attachment will follow the label's configured color and indicate whether the label was
 _Added_ or _Removed_.
 
-![Issue Label Change Tracking](https://cloud.githubusercontent.com/assets/1672405/10585795/1f8c8762-7667-11e5-8f31-0725e81d5b9c.png)
+![Issue Label Change Tracking](https://cloud.githubusercontent.com/assets/1672405/11752981/aa5e06d6-a010-11e5-9aed-9188c4a594e2.png)
 
 # Installation
 **nodejs** and **npm** are prerequisites to the installation of this application.
 
 ### Installing the Service
 
-1. `cd /opt`
-1. `git clone <repository-url> gitlab-slack`    
-    Clone the **gitlab-slack** repository into the `/opt` directory.
-1. `cd gitlab-slack`
-1. `npm install`    
-    Install the **nodejs** dependencies.
-1. `cp scripts/init.d/gitlab-slack /etc/init.d`    
-   Copy the service script to the `/etc/init.d` directory.
-1. `chmod 755 /etc/init.d/gitlab-slack`    
-   Allow the service script to run.
-1. `update-rc.d gitlab-slack start 70 2 3 4 5 . stop 40 0 1 6 .`    
-   On Ubuntu, set the start and stop priorities for the service script.
-1. `service gitlab-slack start`
+The **/scripts** directory contains some example service definitions scripts for various init flavors. Check the **README** files
+in those directories for more information about each script.
 
 ### Adding the GitLab Webhook
 > _The **Master** or **Owner** permission level is required to modify webhooks in GitLab._
 
 1. From the project home, click **Settings**.
 1. Click **Web Hooks**.
-1. If **gitlab-slack** is running on the same server as GitLab, enter `http://127.0.0.1:PORT` into the **URL** field.    
+1. Enter `http://127.0.0.1:PORT` into the **URL** field if, for example, **gitlab-slack** is running on the same server as GitLab.    
    Use the value of the `port` key from the `config.json` file in place of `PORT`.
 1. If **gitlab-slack** is running on another server, enter the appropriate DNS or URI.
 1. Check the **Push events**, **Tag push events** and **Issues events** options. **Merge Request events** are not supported.

@@ -6,10 +6,10 @@ global.Promise = require('bluebird');
 var http = require('http'),
 	util = require('util'),
 	fs = require('fs'),
-	request = Promise.promisify(require('request'));
+	request = require('request-promise'),
+	readFile = Promise.promisify(fs.readFile);
 
-var readFile = Promise.promisify(fs.readFile),
-	LOG_FILE = 'gitlab-slack.log',
+var LOG_FILE = 'gitlab-slack.log',
 	CONFIG_FILE = 'config.json',
 	REGEX_ALL_ZEROES = /^0+$/,
 	REGEX_MARKDOWN_IMAGE_LINK = /!\[([^\]]*)]\(([^)]+)\)/g,
@@ -265,7 +265,7 @@ function parseNotification(httpreq, data) {
  * Processes an issue message.
  * @param {Object} httpreq      The HTTP request.
  * @param {Object} issueData    The issue message data.
- * @returns {Q.Promise} A promise that will be resolved with the slack response.
+ * @returns {Promise} A promise that will be resolved with the slack response.
  */
 function processIssue(httpreq, issueData) {
 	var issueDetails = issueData.object_attributes;
@@ -328,6 +328,9 @@ function processIssue(httpreq, issueData) {
 					// If there is no label difference for an update, we do not continue.
 					return;
 				}
+			} else if (issueDetails.action === 'update') {
+				// If there's no label tracking going on, always ignore updates.
+				return;
 			}
 
 			var assigneeName = '_none_',
@@ -470,7 +473,7 @@ function formatIssueDescription(description, projectUrl) {
  * @param {Object} branchData   The branch message data.
  * @param {Boolean} beforeZero	Indicates whether the `before` hash is all zeroes.
  * @param {Boolean} afterZero	Indicates whether the `after` hash is all zeroes.
- * @returns {Q.Promise} A promise that will be resolved with the slack response.
+ * @returns {Promise} A promise that will be resolved with the slack response.
  */
 function processBranch(httpreq, branchData, beforeZero, afterZero) {
 	logger.debug(httpreq, 'PROCESS: Branch');
@@ -674,7 +677,7 @@ function processTag(httpreq, tagData) {
  * Processes an unrecognized message.
  * @param {Object} httpreq The HTTP request.
  * @param {Object} data The unrecognized data.
- * @returns {Q.Promise} A promise resolved with the unrecognized data.
+ * @returns {Promise} A promise resolved with the unrecognized data.
  */
 function processUnrecognized(httpreq, data) {
 	logger.debug(httpreq, 'PROCESS: Unrecognized');
@@ -916,11 +919,12 @@ function GitLab(baseUrl, token) {
 				'PRIVATE-TOKEN': token
 			},
 			json: true,
-			rejectUnauthorized: false
+			rejectUnauthorized: false,
+			resolveWithFullResponse: true
 		}).catch(function (err) {
 			return processError('gitlab', err);
-		}).spread(function (response, body) {
-			return processResponse('gitlab', response, body);
+		}).then(function (response) {
+			return processResponse('gitlab', response, response.body);
 		});
 	}
 }
