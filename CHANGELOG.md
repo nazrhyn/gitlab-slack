@@ -1,3 +1,12 @@
+## 1.7.0 / 2015-12-11
+* Fixed some issues with missing configuration not falling back to defaults caused by label tracking changes.
+* Fixed image link formatting translation (Fixes #12).
+* Reversed the commit list in commit notifications for a more useful display order (Fixes #6).
+* Added milestone to issue notification header (Fixes #11).
+* Updated README and screenshots for changes and to remove init-flavor-specific instructions.
+* Updated **bluebird** to 3.0.x.
+* Changed promisified **request** out for **request-promise**.
+
 ## 1.6.0 / 2015-10-19
 * Added feature information to the README file. See this file for more information on this version's changes.
 * Added issue label tracking (Fixes #7).
@@ -11,7 +20,7 @@
   * **Italic** -- `*|_` -> `_`
   * **Links/Images** -- `![T](U)|[T](U)` -> `<U|T>`    
     _Since there's no way to send more than one image with an attachment, images are simply converted into links._
-  * **Bullets** -- `*|  *` -> `•|\t•`    
+  * **Bullets** -- `*|  *` -> `ï¿½|\tï¿½`    
     _Initial asterisks indented by one or more spaces are changed to be indented by a single tab._
   * **Headings** -- `#... T` -> `*T*`    
     _Headings are converted to bolded text._
