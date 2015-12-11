@@ -12,7 +12,8 @@ var readFile = Promise.promisify(fs.readFile),
 	LOG_FILE = 'gitlab-slack.log',
 	CONFIG_FILE = 'config.json',
 	REGEX_ALL_ZEROES = /^0+$/,
-	REGEX_MARKDOWN_LINK = /!?\[([^\]]*)]\(([^)]+)\)/g,
+	REGEX_MARKDOWN_IMAGE_LINK = /!\[([^\]]*)]\(([^)]+)\)/g,
+	REGEX_MARKDOWN_LINK = /\[([^\]]*)]\(([^)]+)\)/g,
 	REGEX_MARKDOWN_BOLD = /(\*\*|__)(.*?)\1/g,
 	REGEX_MARKDOWN_ITALIC = /(\*|_)(.*?)\1/g,
 	REGEX_MARKDOWN_BULLET = /^([ \t]+)?\*/mg,
@@ -63,7 +64,7 @@ var config,
 							res.end();
 						})
 						.catch(function(error) {
-							logger.error(req, error);
+							logger.error(req, error.stack || error);
 
 							res.statusCode = 500;
 							res.end(http.STATUS_CODES[500]);
@@ -280,7 +281,7 @@ function processIssue(httpreq, issueData) {
 		function(project, author, issue, assignee) {
 			var projectId = project.id.toString(),
 				projectConfig = config.gitlab.projects[projectId],
-				channel = projectConfig.channel,
+				projectLabelsTracked = !!projectConfig && _.size(projectConfig.labels) > 0,
 				verb;
 
 			switch (issueDetails.action) {
@@ -306,7 +307,7 @@ function processIssue(httpreq, issueData) {
 				addedLabels,
 				removedLabels;
 
-			if (_.size(projectConfig.labels) > 0 && ['open', 'reopen', 'update'].indexOf(issueDetails.action) !== -1) {
+			if (projectLabelsTracked && ['open', 'reopen', 'update'].indexOf(issueDetails.action) !== -1) {
 				// If this is open, reopen or update and there are labels tracked for this project,
 				//  make sure we care about it before we do anything else.
 
@@ -370,28 +371,38 @@ function processIssue(httpreq, issueData) {
 			switch (issueDetails.action) {
 				case 'open':
 				case 'reopen':
-					// For open or re-open, we start with an empty cache; all labels are newly added.
-					projectIssues[issue.id] = [];
-
-					// Also, open and re-open are the only ones that get the full issue description.
+					// Open and re-open are the only ones that get the full issue description.
 					mainAttachment.fallback += '\n' + issueDetails.description;
-					mainAttachment.text = formatIssueDescription(issueDetails.description);
-					/* falls through */
-				case 'update':
-					addLabelChangeAttachments(projectLabels, response.attachments, 'Added', addedLabels);
-					addLabelChangeAttachments(projectLabels, response.attachments, 'Removed', removedLabels);
+					mainAttachment.text = formatIssueDescription(issueDetails.description, project.web_url);
 
-					// Now, update the cache to the current state of affairs.
-					projectIssues[issue.id] = issue.labels;
-					break;
-				case 'close':
-					// When issues are closed, we remove them from the cache.
-					delete projectIssues[issue.id];
 					break;
 			}
 
-			if (channel) {
-				response.channel = channel;
+			if (projectLabelsTracked) {
+				// This switch handles the label tracking management and reporting stuff.
+				switch (issueDetails.action) {
+					case 'open':
+					case 'reopen':
+						// For open or re-open, we start with an empty cache; all labels are newly added.
+						projectIssues[issue.id] = [];
+
+					/* falls through */
+					case 'update':
+						addLabelChangeAttachments(projectLabels, response.attachments, 'Added', addedLabels);
+						addLabelChangeAttachments(projectLabels, response.attachments, 'Removed', removedLabels);
+
+						// Now, update the cache to the current state of affairs.
+						projectIssues[issue.id] = issue.labels;
+						break;
+					case 'close':
+						// When issues are closed, we remove them from the cache.
+						delete projectIssues[issue.id];
+						break;
+				}
+			}
+
+			if (projectConfig && projectConfig.channel) {
+				response.channel = projectConfig.channel;
 			}
 
 			return response;
@@ -420,14 +431,25 @@ function addLabelChangeAttachments(projectLabels, attachments, action, labels) {
 /**
  * Converts Markdown links, bullets, bold and italic to Slack style formatting.
  * @param {String} description The description.
+ * @param {String} projectUrl The project web URL.
  * @returns {String} The formatted description.
  */
-function formatIssueDescription(description) {
+function formatIssueDescription(description, projectUrl) {
+	// Reset the last indices...
+	REGEX_MARKDOWN_BULLET.lastIndex =
+	REGEX_MARKDOWN_IMAGE_LINK.lastIndex =
+	REGEX_MARKDOWN_LINK.lastIndex =
+	REGEX_MARKDOWN_ITALIC.lastIndex =
+	REGEX_MARKDOWN_BOLD.lastIndex =
+	REGEX_MARKDOWN_HEADER.lastIndex = 0;
+
 	return description
 		.replace(REGEX_MARKDOWN_BULLET, function (match, indent) {
 			// If the indent is present, replace it with a tab.
 			return (indent ? '\t' : '') + '•';
 		})
+		// Image links are sent without the project web URL prefix.
+		.replace(REGEX_MARKDOWN_IMAGE_LINK, '<' + projectUrl + '$2|$1>')
 		.replace(REGEX_MARKDOWN_LINK, '<$2|$1>')
 		.replace(REGEX_MARKDOWN_ITALIC, '_$2_')
 		.replace(REGEX_MARKDOWN_BOLD, '*$2*')
@@ -455,7 +477,7 @@ function processBranch(httpreq, branchData, beforeZero, afterZero) {
 
 	// Resolve the project ID and user ID to get more info.
 	return Promise.join(gitlab.getProject(branchData.project_id), gitlab.getUserById(branchData.user_id), function (project, user) {
-		var channel = config.gitlab.projects[project.id.toString()].channel,
+		var projectConfig = config.gitlab.projects[project.id.toString()],
 			branch = branchData.ref.substr(branchData.ref.lastIndexOf('/') + 1),
 			response = {
 				parse: 'none',
@@ -472,8 +494,8 @@ function processBranch(httpreq, branchData, beforeZero, afterZero) {
 				)
 			};
 
-		if (channel) {
-			response.channel = channel;
+		if (projectConfig && projectConfig.channel) {
+			response.channel = projectConfig.channel;
 		}
 
 		return response;
@@ -506,7 +528,7 @@ function processCommit(httpreq, commitData) {
 	});
 
 	return Promise.all(calls).spread(function(project, user) {
-		var channel = config.gitlab.projects[project.id.toString()].channel,
+		var projectConfig = config.gitlab.projects[project.id.toString()],
 			attachment = {
 				color: '#317CB9',
 				mrkdwn_in: ['text']
@@ -581,8 +603,8 @@ function processCommit(httpreq, commitData) {
 		attachment.fallback = attachmentFallbacks.join('\n');
 		attachment.text = attachmentTexts.join('\n');
 
-		if (channel) {
-			response.channel = channel;
+		if (projectConfig && projectConfig.channel) {
+			response.channel = projectConfig.channel;
 		}
 
 		return response;
@@ -612,7 +634,7 @@ function processTag(httpreq, tagData) {
 
 	// Resolve the project ID and user ID to get more info.
 	return Promise.join(gitlab.getProject(tagData.project_id), gitlab.getUserById(tagData.user_id), function (project, user) {
-		var channel = config.gitlab.projects[project.id.toString()].channel,
+		var projectConfig = config.gitlab.projects[project.id.toString()],
 			tag = tagData.ref.substr(tagData.ref.lastIndexOf('/') + 1),
 			response = {
 				text: util.format(
@@ -628,8 +650,8 @@ function processTag(httpreq, tagData) {
 				)
 			};
 
-		if (channel) {
-			response.channel = channel;
+		if (projectConfig && projectConfig.channel) {
+			response.channel = projectConfig.channel;
 		}
 
 		return response;

@@ -36,7 +36,7 @@ start_it() {
 
 	echo "Starting $APP_NAME..."
 	cd $APP_DIR
-	$NODE_EXEC "$APP_DIR/$NODE_APP" 1>>$LOG_FILE 2>&1 &
+	$NODE_EXEC --harmony "$APP_DIR/$NODE_APP" 1>>$LOG_FILE 2>&1 &
 	echo $! > $PID_FILE
 	echo "$APP_NAME started with PID $!."
 }

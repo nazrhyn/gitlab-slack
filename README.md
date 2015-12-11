@@ -71,7 +71,7 @@ tag name as a link. All commit information for branch creation is discarded as t
 ![Issue Notifications](https://cloud.githubusercontent.com/assets/1672405/10584895/9e8fe306-7662-11e5-918c-bf2d8452576e.png)    
 Issue notifications include the repository name, the username of the user performed the issue action, the username of the user to
 whom the issues is assigned and the username of the user who created the issue. Each username is formatted as a link. Issue notifications
-include a main attachment that includes the titile of the issue, as a link, and, depending on the kind of action, also the issue
+include a main attachment that includes the title of the issue, as a link, and, depending on the kind of action, also the issue
 description. Additional attachments will be included for changes to tracked labels. ([more info](#issue-label-tracking))
 
 ### Issue Mention Summary
