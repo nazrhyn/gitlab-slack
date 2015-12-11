@@ -514,6 +514,10 @@ function processCommit(httpreq, commitData) {
 	// Resolve the project ID and user ID to get more info.
 	var calls = [gitlab.getProject(commitData.project_id), gitlab.getUserById(commitData.user_id)];
 
+	// Reverse the commits list so that "more recent" stuff is on top for display.
+	//  This is not reverse chronological.
+	commitData.commits.reverse();
+
 	// Also resolve each commit's user by email address.
 	commitData.commits.forEach(function(c) {
 		var email = c.author.email.toLowerCase();
