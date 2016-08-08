@@ -16,10 +16,15 @@ var LOG_FILE = 'gitlab-slack.log',
 	REGEX_MARKDOWN_LINK = /\[([^\]]*)]\(([^)]+)\)/g,
 	REGEX_MARKDOWN_BOLD = /(\*\*|__)(.*?)\1/g,
 	REGEX_MARKDOWN_ITALIC = /(\*|_)(.*?)\1/g,
-	REGEX_MARKDOWN_BULLET = /^([ \t]+)?\*/mg,
+	REGEX_MARKDOWN_BULLET = /^([ \t]+)?\*(?!\*)/mg,
 	REGEX_MARKDOWN_HEADER = /^#+(.+)$/mg,
 	REGEX_ISSUE_MENTION = /#\d+/g,
 	ISSUE_BATCH_FETCH_STEP = 10;
+
+// Turn off bluebird's warnings about unterminated promise chains.
+Promise.config({
+	warnings: false
+});
 
 process.on('uncaughtException', function(err) {
 	// Make sure we at least know what blew up before we quit.
@@ -68,8 +73,7 @@ var config,
 
 							res.statusCode = 500;
 							res.end(http.STATUS_CODES[500]);
-						})
-						.done();
+						});
 				}
 			});
 
@@ -582,7 +586,10 @@ function processCommit(httpreq, commitData) {
 			}
 
 			if (issues) {
-				// If there were issues, build the fallback suffix here.
+				// If there were issues, make sure each issue is only mentioned once...
+				issues = _.unique(issues);
+
+				// ... and then build the fallback suffix.
 				issuesSuffix = ' (' + issues.join(', ') + ')';
 			}
 

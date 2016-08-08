@@ -1,6 +1,6 @@
 {
   "name": "gitlab-slack",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "A service that receives hook notifications from GitLab and posts information to an incoming webhook on Slack.",
   "author": "Chris Harwood",
   "license": "MIT",
@@ -10,8 +10,9 @@
     "url": "https://github.com/nazrhyn/gitlab-slack.git"
   },
   "dependencies": {
-    "bluebird": "^3.0.6",
-    "request-promise": "^1.0.2",
+    "bluebird": "^3.4.1",
+    "request": "^2.74.0",
+    "request-promise": "^4.1.1",
     "underscore": "^1.8.3"
   },
   "devDependencies": {},
