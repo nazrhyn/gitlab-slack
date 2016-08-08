@@ -4,6 +4,8 @@
   * **request-promise** -> 4.1.1 (added **request** as peer dependency)
 * Updated bullet regex to make sure it doesn't match initial bold text (Fixes #18)
 * Added unique filter for detected issue mentions (Fixes #17)
+* Changed cacheIssueLabels to use map->each with concurrency (Fixes #10)
+* Refactored initial loading promise chain error handling to actually work properly
 
 ## 1.7.0 / 2015-12-11
 * Fixed some issues with missing configuration not falling back to defaults caused by label tracking changes.
