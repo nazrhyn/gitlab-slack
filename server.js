@@ -18,15 +18,14 @@ var LOG_FILE = 'gitlab-slack.log',
 	REGEX_MARKDOWN_ITALIC = /(\*|_)(.*?)\1/g,
 	REGEX_MARKDOWN_BULLET = /^([ \t]+)?\*(?!\*)/mg,
 	REGEX_MARKDOWN_HEADER = /^#+(.+)$/mg,
-	REGEX_ISSUE_MENTION = /#\d+/g,
-	ISSUE_BATCH_FETCH_STEP = 10;
+	REGEX_ISSUE_MENTION = /#\d+/g;
 
 // Turn off bluebird's warnings about unterminated promise chains.
 Promise.config({
 	warnings: false
 });
 
-process.on('uncaughtException', function(err) {
+process.on('uncaughtException', function (err) {
 	// Make sure we at least know what blew up before we quit.
 	fs.appendFileSync(LOG_FILE, 'UNCAUGHT EXCEPTION: ' + err.toString() + '\n' + err.stack);
 	process.exit(1);
@@ -37,17 +36,17 @@ var config,
 	labelCache = {},
 	issueCache = {},
 	logger = new Logger(LOG_FILE),
-	server = http.createServer(function(req, res) {
+	server = http.createServer(function (req, res) {
 		logger.debug(req, 'Request received.');
 
 		if (req.method === 'POST') {
 			var buffers = [];
 
-			req.on('data', function(data) {
+			req.on('data', function (data) {
 				buffers.push(data);
 			});
 
-			req.on('end', function() {
+			req.on('end', function () {
 				var rawData = Buffer.concat(buffers).toString(),
 					data;
 
@@ -65,10 +64,10 @@ var config,
 					logger.debug(req, 'DATA: %j', data);
 
 					parseNotification(req, data)
-						.then(function() {
+						.then(function () {
 							res.end();
 						})
-						.catch(function(error) {
+						.catch(function (error) {
 							logger.error(req, error.stack || error);
 
 							res.statusCode = 500;
@@ -84,36 +83,50 @@ var config,
 	});
 
 // I'd like more specific error messages, so that's why the interstitial catches.
-readFile(CONFIG_FILE, { encoding: 'utf8' }).catch(function(err) {
-	logger.error(null, 'Unable to read config file. ERROR: %s', err.stack || err);
-	throw err;
-}).then(function(contents) {
-	config = JSON.parse(contents);
-
-	// Pre-compile all of the label regexes.
-	_.each(config.gitlab.projects, function (project) {
-		_.each(project.labels, function (label, index) {
-			project.labels[index] = new RegExp(label, "i"); // It's good to be insensitive.
+Promise
+	.try(function () {
+		return readFile(CONFIG_FILE, { encoding: 'utf8' }).catch(function (err) {
+			logger.error(null, 'Unable to read config file. ERROR: %s', err.stack || err);
+			throw err;
 		});
+	})
+	.then(function (contents) {
+		return Promise.try(function () {
+			config = JSON.parse(contents);
+
+			// Pre-compile all of the label regexes.
+			_.each(config.gitlab.projects, function (project) {
+				_.each(project.labels, function (label, index) {
+					project.labels[index] = new RegExp(label, "i"); // It's good to be insensitive.
+				});
+			});
+
+			// Initialize the gitlab API wrapper.
+			gitlab = new GitLab(config.gitlab.baseUrl, config.gitlab.api.token);
+		}).catch(function (err) {
+			logger.error(null, 'Unable to parse config file. ERROR: %s', err.stack || err);
+			throw err;
+		});
+	})
+	.then(function () {
+		return buildIssueLabelCache().catch(function (err) {
+			logger.error(null, 'Unable to build issue/label cache. ERROR: %s', err.stack || err);
+			throw err;
+		});
+	})
+	.then(function () {
+		return Promise.try(function () {
+			logger.debug(null, 'Listening on port %s.', config.port);
+
+			server.listen(config.port);
+		}).catch(function (err) {
+			logger.error(null, 'Unable to start service. ERROR: %s', err.stack || err);
+			throw err;
+		});
+	})
+	.catch(function () {
+		process.exit(1);
 	});
-
-	// Initialize the gitlab API wrapper.
-	gitlab = new GitLab(config.gitlab.baseUrl, config.gitlab.api.token);
-}).catch(function (err) {
-	logger.error(null, 'Unable to parse config file. ERROR: %s', err.stack || err);
-	throw err;
-}).then(function () {
-	return buildIssueLabelCache();
-}).catch(function (err) {
-	logger.error(null, 'Unable to build issue/label cache. ERROR: %s', err.stack || err);
-	throw err;
-}).then(function () {
-	 logger.debug(null, 'Listening on port %s.', config.port);
-
-	 server.listen(config.port);
-}).catch(function (err) {
-	logger.error(null, 'Unable to start service. ERROR: %s', err.stack || err);
-});
 
 // ============================================================================================
 
@@ -151,7 +164,7 @@ function buildIssueLabelCache() {
 				}).then(function () {
 					logger.debug(null, '[CACHE][%s] Discovered %s open issues.', projectId, _.keys(projectIssues).length);
 
-					return cacheIssueLabels(projectIssues, projectId, 0);
+					return cacheIssueLabels(projectIssues, projectId);
 				}).then(function () {
 					logger.debug(null, '[CACHE][%s] Cached all issue label information.', projectId);
 				});
@@ -178,6 +191,7 @@ function cacheProjectIssues(issueCache, projectId, page) {
 		issueCache[issue.id] = true;
 	}).then(function (issues) {
 		if (issues.length > 0) {
+			logger.debug(null, '[CACHE][%s] Cached %d issues...', projectId, issues.length);
 			return cacheProjectIssues(issueCache, projectId, ++page);
 		}
 	});
@@ -187,28 +201,21 @@ function cacheProjectIssues(issueCache, projectId, page) {
  * Gets the details for each of the issues in the cache and stores their label information.
  * @param {Object} issueCache The issues cache for this project.
  * @param {Number} projectId The project ID.
- * @param {Number} start The offset within the cache at which to start fetching.
  * @returns {Promise} A promise that will be resolved when all issue label information is cached.
  */
-function cacheIssueLabels(issueCache, projectId, start) {
-	// Get a batch of issue IDs from `start` to `start + STEP_SIZE`.
-	var batch = _.chain(issueCache).keys().rest(start).first(ISSUE_BATCH_FETCH_STEP).value();
-
-	if (batch.length > 0) {
-		var gets = [];
-
-		_.each(batch, function (issueId) {
-			gets.push(gitlab.getIssue(projectId, issueId));
-		});
-
-		return Promise.all(gets).each(function (issue) {
+function cacheIssueLabels(issueCache, projectId) {
+	logger.debug(null, '[CACHE][%s] Caching issue labels...', projectId);
+	return Promise
+		.map(
+			_.keys(issueCache),
+			function (issueId) {
+				return gitlab.getIssue(projectId, issueId);
+			},
+			{ concurrency: 10 } // Allow up to 10 simultaneous API requests.
+		)
+		.each(function (issue) {
 			issueCache[issue.id] = issue.labels;
-		}).then(function () {
-			return cacheIssueLabels(issueCache, projectId, start + ISSUE_BATCH_FETCH_STEP);
 		});
-	}
-
-	return Promise.resolve();
 }
 
 /**
@@ -246,7 +253,7 @@ function parseNotification(httpreq, data) {
 		processed = processUnrecognized(httpreq, data);
 	}
 
-	return processed.then(function(response) {
+	return processed.then(function (response) {
 		if (!response) {
 			// If the processing resulted in nothing, it was probably ignored.
 			return;
@@ -284,7 +291,7 @@ function processIssue(httpreq, issueData) {
 		issueDetails.milestone_id ? gitlab.getMilestone(issueDetails.project_id, issueDetails.milestone_id) : Promise.resolve(null),
 		// Assignee can be null, so don't try to fetch details if it is.
 		issueDetails.assignee_id ? gitlab.getUserById(issueDetails.assignee_id) : Promise.resolve(null),
-		function(project, author, issue, milestone, assignee) {
+		function (project, author, issue, milestone, assignee) {
 			var projectId = project.id.toString(),
 				projectConfig = config.gitlab.projects[projectId],
 				projectLabelsTracked = !!projectConfig && _.size(projectConfig.labels) > 0,
@@ -534,7 +541,7 @@ function processCommit(httpreq, commitData) {
 	commitData.commits.reverse();
 
 	// Also resolve each commit's user by email address.
-	commitData.commits.forEach(function(c) {
+	commitData.commits.forEach(function (c) {
 		var email = c.author.email.toLowerCase();
 
 		calls.push(gitlab.searchUser(email).then(function (results) {
@@ -546,7 +553,7 @@ function processCommit(httpreq, commitData) {
 		}));
 	});
 
-	return Promise.all(calls).spread(function(project, user) {
+	return Promise.all(calls).spread(function (project, user) {
 		var projectConfig = config.gitlab.projects[project.id.toString()],
 			attachment = {
 				color: '#317CB9',
@@ -758,7 +765,7 @@ function Logger(filename) {
 	 * @param {String} format The log entry format.
 	 * @param {*...} [args] The format arguments.
 	 */
-	this.log = function(level, httpreq, format, args) {
+	this.log = function (level, httpreq, format, args) {
 		var httpinfo = '';
 
 		if (httpreq) {
@@ -782,7 +789,7 @@ function Logger(filename) {
 	 * @param {String} format The log entry format.
 	 * @param {*...} [args] The format arguments.
 	 */
-	this.debug = function(httpreq, format, args) {
+	this.debug = function (httpreq, format, args) {
 		this.log.apply(this, ['DEBUG'].concat(Array.prototype.slice.call(arguments)));
 	};
 
@@ -792,7 +799,7 @@ function Logger(filename) {
 	 * @param {String} format The log entry format.
 	 * @param {*...} [args] The format arguments.
 	 */
-	this.error = function(httpreq, format, args) {
+	this.error = function (httpreq, format, args) {
 		this.log.apply(this, ['ERROR'].concat(Array.prototype.slice.call(arguments)));
 	};
 }
@@ -812,7 +819,7 @@ function GitLab(baseUrl, token) {
 	 * @param {String|Number} id The user ID.
 	 * @returns {Promise} A promise that will be resolved with the user information.
 	 */
-	this.getUserById = function(id) {
+	this.getUserById = function (id) {
 		return sendRequest('/users/:id'.replace(':id', id.toString()));
 	};
 
@@ -821,7 +828,7 @@ function GitLab(baseUrl, token) {
 	 * @param {String} email User email address.
 	 * @returns {Promise} A promise that will be resolved with a list of matching users.
 	 */
-	this.searchUser = function(email) {
+	this.searchUser = function (email) {
 		return sendRequest('/users', {
 			search: email
 		});
@@ -832,7 +839,7 @@ function GitLab(baseUrl, token) {
 	 * @param {String|Number} id The project ID.
 	 * @returns {Promise} A promise that will be resolved with the project information.
 	 */
-	this.getProject = function(id) {
+	this.getProject = function (id) {
 		return sendRequest('/projects/:id'.replace(':id', id.toString()));
 	};
 
@@ -856,7 +863,7 @@ function GitLab(baseUrl, token) {
 		return sendRequest('/projects/:id/issues'.replace(':id', projectId.toString()), {
 			state: state,
 			page: page,
-			per_page: 50
+			per_page: 100
 		});
 	};
 
