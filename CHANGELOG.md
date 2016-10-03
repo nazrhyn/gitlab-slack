@@ -1,3 +1,6 @@
+## 1.7.2 / 2016-10-03
+* Fixed an issue where label update notifications are sent after an issue is closed (Fixes #20)
+
 ## 1.7.1 / 2016-08-08
 * Updated dependencies
   * **bluebird** -> 3.4.1

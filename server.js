@@ -324,6 +324,12 @@ function processIssue(httpreq, issueData) {
 				// If this is open, reopen or update and there are labels tracked for this project,
 				//  make sure we care about it before we do anything else.
 
+				if (issueDetails.action === 'update' && issueDetails.state === 'closed') {
+					// Sometimes GitLab generates an update event after the issue has been closed; if it does,
+					//  we want to just ignore that.
+					return;
+				}
+
 				addedLabels = _.chain(issue.labels) // Difference between the new label set...
 					.difference(projectIssues[issue.id]) // ...and the old label set...
 					.intersection(_.keys(projectLabels)) // ...intersected with what we care about.

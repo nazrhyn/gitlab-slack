@@ -1,6 +1,6 @@
 {
   "name": "gitlab-slack",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "A service that receives hook notifications from GitLab and posts information to an incoming webhook on Slack.",
   "author": "Chris Harwood",
   "license": "MIT",
