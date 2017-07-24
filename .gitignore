@@ -1,3 +1,4 @@
 .idea/
 node_modules/
-/gitlab-slack*.log
+
+npm-debug.log*

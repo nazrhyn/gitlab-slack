@@ -1,3 +1,50 @@
+## 2.0.0 / 2017-07-21
+I wrote this service only a few months after I had started writing Node.js for the first time. The more time went by, the more what I had written distressed me and became harder to maintain. I finally got some time to rewrite the whole thing, fixing some bugs and adding features in the process. While I'm not willing to send this release to the Ivory Tower, I'm still significantly happier with it.
+
+**Enjoy.**
+
+### Project Changes
+* Complete re-write of the whole service from the ground up using ES6 syntax, coroutines, and other delightful, modern things
+* Now targeting Node.js 6.x LTS and NPM 5.x
+  * Added `package-lock.json`
+* Designed to work with the **v4** GitLab API and other features from GitLab **9.x**
+* Added `.editorconfig` to enforce line endings and help with Markdown ([more info](http://editorconfig.org/))
+* Switched from **JSHint** to **ESLint** (4.2.0)
+* Switched from **underscore** to **lodash** (4.17.x)
+* Switched to **debug** for logging and dropped my _special_ logger (Fixes #15)
+  * In supported terminals, logging output is colored for improved readability
+* Updated the `package.json` with some more information and marked the package as private
+* Updated the `README.md` with new features, up-to-date screenshots and more details
+  * Added a **Limitations** section that hopefully will cover the constraints of the project
+
+### Service Changes
+* Added handling for `SIGINT` and `SIGTERM` for more graceful exits
+* Where appropriate, **Bluebird** coroutines using generator functions are used to simplify asynchronous code
+* All code is strict-mode ES6, taking advantage of fun language features where appropriate
+* Significant modularization applied to split components into small working parts
+* Issue and label caching system slimmed and improved
+  * Only watched labels are cached rather than all labels of qualifying issues
+* All handler code is appropriately connected through uninterrupted promise chains
+  * Fixes some phantom, unhandled promise return issues and allows **Bluebird** warnings to remain on :tada:
+* Tried using the `WeakMap` "privates" pattern with ES6 classes; I'm still on the fence on this one
+* Added an attempt at intellingent resolution of GitLab project ID from available information
+  * When `project_id` is present in webhook objects is inconsistent and this service needs it to look up the project configuration
+* Significantly cleaned up and improved HTTP server code
+
+### Notification Changes
+* Significant simplification and reduction in GitLab API calls due to GitLab increasing what is available in webhook messages
+* Added support for merge request notifications
+* Added support for wiki page notifications
+* When a new-branch message is processed, if it includes any commits, those are also notified (Fixes #14)
+* When a tag includes a message, it is notified as well
+* Re-ordered first line of issue notification to match data-point order of other notification types
+* Issue links no longer duplicate issue mentions found in the first line of commit messages
+* Improved Markdown-to-Slack-formatting converter
+  * Headings that are already bolded will be left as such
+* Simplification and tightening up of issue handling and label tracking
+
+------
+
 ## 1.7.2 / 2016-10-03
 * Fixed an issue where label update notifications are sent after an issue is closed (Fixes #20)
 
