@@ -1,3 +1,6 @@
+## 2.0.1 / 2017-07-24
+* Fixed issue with filename casing
+
 ## 2.0.0 / 2017-07-21
 I wrote this service only a few months after I had started writing Node.js for the first time. The more time went by, the more what I had written distressed me and became harder to maintain. I finally got some time to rewrite the whole thing, fixing some bugs and adding features in the process. While I'm not willing to send this release to the Ivory Tower, I'm still significantly happier with it.
 
