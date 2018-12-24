@@ -46,17 +46,19 @@ module.exports = function (data) {
 };
 
 Object.defineProperty(
-	module.exports,
-	'KIND',
-	{
-		enumerable: true,
-		value: Object.freeze({
-			name: 'pipeline',
-			title: 'pipeline'
-		})
-    },
-    'COLOR', {
-        enumerable: true,
-        value: '#31B93D'
+    module.exports,
+    {
+        'KIND':
+        {
+            enumerable: true,
+            value: Object.freeze({
+                name: 'pipeline',
+                title: 'pipeline'
+            })
+        },
+        'COLOR': {
+            enumerable: true,
+            value: '#31B93D'
+        }
     }
 );
