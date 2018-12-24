@@ -14,7 +14,11 @@ const debug = debugCreate('gitlab-slack:handler:job');
 module.exports = function (data) {
 	debug('Handling message...');
 
-	const wikiDetails = data.object_attributes,
+	const attachment = {
+		mrkdwn_in: ['text'],
+		color: module.exports.COLOR,
+		title: data.commit.message
+	},
 		output = {
 			parse: 'none',
 			text: util.format(
@@ -28,7 +32,8 @@ module.exports = function (data) {
 				data.user.name,
 				data.user.name,
 				data.build_status
-			)
+			),
+			attachments: [attachment]
 		};
 
 	debug('Message handled.');
