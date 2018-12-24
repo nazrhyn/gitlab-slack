@@ -21,13 +21,13 @@ module.exports = function (data) {
 				'[%s] <%s/jobs/%s| %s %s> by <%s/u/%s|%s> %s',
 				data.repository.name,
 				data.repository.homepage,
-				wikiDetails.build_id,
-				wikiDetails.build_name,
-				wikiDetails.build_id,
+				data.build_id,
+				data.build_name,
+				data.build_id,
 				data.repository.homepage,
 				data.user.name,
 				data.user.name,
-				wikiDetails.build_status
+				data.build_status
 			)
 		};
 
