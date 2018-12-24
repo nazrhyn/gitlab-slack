@@ -19,14 +19,14 @@ module.exports = function (data) {
 			parse: 'none',
 			text: util.format(
 				'[%s] <%s/jobs/%s| %s %s> by <%s/u/%s|%s> %s',
-				data.project.name,
-				data.project.web_url,
+				data.repository.name,
+				data.repository.homepage,
 				wikiDetails.build_id,
 				wikiDetails.build_name,
 				wikiDetails.build_id,
-				data.project.web_url,
-				data.user.username,
-				data.user.username,
+				data.repository.homepage,
+				data.user.name,
+				data.user.name,
 				wikiDetails.build_status
 			)
 		};
