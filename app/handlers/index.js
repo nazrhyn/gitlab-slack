@@ -13,7 +13,8 @@ const handleIssue = require(path.join(global.__paths.handlers, 'issue')),
 	handleTag = require(path.join(global.__paths.handlers, 'tag')),
 	handleMergeRequest = require(path.join(global.__paths.handlers, 'mergeRequest')),
 	handleWikiPage = require(path.join(global.__paths.handlers, 'wikiPage')),
-	handlePipelinePage = require(path.join(global.__paths.handlers, 'pipeline'));
+	handlePipelinePage = require(path.join(global.__paths.handlers, 'pipeline')),
+	handleBuildPage = require(path.join(global.__paths.handlers, 'build'));
 
 const debug = debugCreate('gitlab-slack:handler');
 
@@ -67,6 +68,9 @@ exports.handleMessage = Promise.coroutine(function* (projectConfigs, labelColors
 				break;
 			case handlePipelinePage.KIND.name:
 				outputs = yield handlePipelinePage(data);
+				break;
+			case handleBuildPage.KIND.name:
+				outputs = yield handleBuildPage(data);
 				break;
 			default:
 				// Unhandled/unrecognized messages go to the default channel for the webhook
