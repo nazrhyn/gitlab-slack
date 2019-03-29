@@ -1,6 +1,7 @@
 'use strict';
 
-const chalk = require('chalk'),
+const _ = require('lodash'),
+	chalk = require('chalk'),
 	debugCreate = require('debug');
 
 const REGEX_MARKDOWN_LINK = /(!)?\[([^\]]*)]\(([^)]+)\)/g,
@@ -70,18 +71,18 @@ exports.actionToVerb = function (action) {
  * @param {GitLabApi} api The GitLab API.
  * @returns {Promise<Number|undefined>} A Promise that will be resolved with the project ID.
  */
-exports.getProjectId = Promise.coroutine(function* (data, api) {
+exports.getProjectId = async function (data, api) {
 	let projectId = data.project_id;
 
 	if (!_.isNil(projectId)) {
-		return Promise.resolve(projectId);
+		return projectId;
 	}
 
 	// If the project ID isn't on the data root, we'll try to look up the project information
 	//  by its path-with-namespace value.
 
 	if (data.project && data.project.path_with_namespace) {
-		const project = yield api.getProject(encodeURIComponent(data.project.path_with_namespace));
+		const project = await api.getProject(encodeURIComponent(data.project.path_with_namespace));
 
 		projectId = project.id;
 	}
@@ -92,7 +93,7 @@ exports.getProjectId = Promise.coroutine(function* (data, api) {
 
 	// At this point, we might have found nothing, but just return whatever we've got.
 	return projectId;
-});
+};
 
 /**
  * Converts several Markdown constructs to Slack-style formatting.
@@ -129,9 +130,9 @@ exports.convertMarkdownToSlack = function (description, projectUrl) {
 		// Finalize bold and italic from the intermediary.
 		.replace(REGEX_MARKDOWN_BOLD_INTERMEDIARY, '*')
 		.replace(REGEX_MARKDOWN_ITALIC_INTERMEDIARY, '_')
-		// If it looks like there's already bolding in the header, don't try to add more.
 		.replace(REGEX_MARKDOWN_HEADER, function (match, heading) {
 			if (heading.includes('*')) {
+				// If it looks like there's already bolding in the header, don't try to add more.
 				return heading;
 			}
 

@@ -1,0 +1,5 @@
+tunnels:
+  gs:
+    proto: http
+    addr: 4646
+    subdomain: gitlab-slack

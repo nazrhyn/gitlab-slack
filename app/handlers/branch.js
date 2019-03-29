@@ -1,6 +1,10 @@
 'use strict';
 
 const debugCreate = require('debug'),
+	/**
+	 * @type {Configuration}
+	 */
+	config = require('../../config'),
 	util = require('util');
 
 const debug = debugCreate('gitlab-slack:handler:branch');
@@ -12,7 +16,7 @@ const debug = debugCreate('gitlab-slack:handler:branch');
  * @param {Boolean} afterZero Indicates whether the after hash is all zeroes.
  * @returns {Promise<Object>} A promise that will be resolved with the output data structure.
  */
-module.exports = function (data, beforeZero, afterZero) {
+module.exports = async function (data, beforeZero, afterZero) {
 	debug('Handling message...');
 
 	let action = '[unknown]';
@@ -23,13 +27,13 @@ module.exports = function (data, beforeZero, afterZero) {
 		action = 'deleted branch';
 	}
 
-	const branch = data.ref.substr(data.ref.lastIndexOf('/') + 1),
+	const branch = data.ref.replace('refs/heads/', ''),
 		output = {
 			parse: 'none',
 			text: util.format(
 				'[%s] <%s/u/%s|%s> %s <%s/tree/%s|%s>',
-				data.repository.name,
-				global.config.gitLab.baseUrl,
+				data.project.path_with_namespace,
+				config.gitLab.baseUrl,
 				data.user_username,
 				data.user_username,
 				action,
@@ -42,18 +46,15 @@ module.exports = function (data, beforeZero, afterZero) {
 	debug('Message handled.');
 
 	output.__kind = module.exports.KIND;
-	// There's no async in this function, but we have to maintain the contract.
-	return Promise.resolve(output);
+
+	return output;
 };
 
-Object.defineProperty(
-	module.exports,
-	'KIND',
-	{
-		enumerable: true,
-		value: Object.freeze({
-			name: 'push',
-			title: 'Branch'
-		})
-	}
-);
+/**
+ * Provides metadata for this kind of handler.
+ * @type {HandlerKind}
+ */
+module.exports.KIND = Object.freeze({
+	name: 'push',
+	title: 'Branch'
+});

@@ -1,8 +1,12 @@
 'use strict';
 
 const chalk = require('chalk'),
+	/**
+	 * @type {Configuration}
+	 */
+	config = require('../../config'),
 	debugCreate = require('debug'),
-	helpers = require(path.join(global.__paths.lib, 'helpers')),
+	helpers = require('../lib/helpers'),
 	util = require('util');
 
 const debug = debugCreate('gitlab-slack:handler:mergerequest');
@@ -12,48 +16,50 @@ const debug = debugCreate('gitlab-slack:handler:mergerequest');
  * @param {Object} data The message data.
  * @returns {Promise<Object|undefined>} A promise that will be resolved with the output data structure.
  */
-module.exports = function (data) {
+module.exports = async function (data) {
 	debug('Handling message...');
 
-	const mergeRequestDetails = data.object_attributes;
+	const mr = data.object_attributes;
 
-	if (mergeRequestDetails.action === 'update') {
+	if (mr.action === 'update') {
 		// We always ignore updates as they're too spammy.
 		debug(chalk`Ignored. ({blue update})`);
-		return Promise.resolve();
+		return;
 	}
 
-	const verb = helpers.actionToVerb(mergeRequestDetails.action),
-		description = mergeRequestDetails.description.split(/(?:\r\n|[\r\n])/)[0], // Take only the first line of the description.
+	const verb = helpers.actionToVerb(mr.action),
+		description = mr.description.split(/(?:\r\n|[\r\n])/)[0], // Take only the first line of the description.
+		/* eslint-disable camelcase */ // Required property naming.
 		attachment = {
 			mrkdwn_in: ['text'],
 			color: module.exports.COLOR,
-			title: mergeRequestDetails.title,
-			title_link: mergeRequestDetails.url
+			title: mr.title,
+			title_link: mr.url
 		};
+		/* eslint-enable camelcase */
 
 	let assigneeName = '_none_';
 
 	if (data.assignee) {
-		assigneeName = util.format('<%s/u/%s|%s>', global.config.gitLab.baseUrl, data.assignee.username, data.assignee.username);
+		assigneeName = util.format('<%s/u/%s|%s>', config.gitLab.baseUrl, data.assignee.username, data.assignee.username);
 	}
 
 	const output = {
 		parse: 'none',
 		text: util.format(
 			'[%s] <%s/u/%s|%s> %s merge request *!%s* — *source:* <%s/tree/%s|%s> — *target:* <%s/tree/%s|%s> - *assignee* - %s',
-			data.repository.name,
-			global.config.gitLab.baseUrl,
+			data.project.path_with_namespace,
+			config.gitLab.baseUrl,
 			data.user.username,
 			data.user.username,
 			verb,
-			mergeRequestDetails.iid,
-			global.config.gitLab.baseUrl,
-			mergeRequestDetails.source_branch,
-			mergeRequestDetails.source_branch,
-			global.config.gitLab.baseUrl,
-			mergeRequestDetails.target_branch,
-			mergeRequestDetails.target_branch,
+			mr.iid,
+			mr.source.web_url,
+			mr.source_branch,
+			mr.source_branch,
+			mr.target.web_url,
+			mr.target_branch,
+			mr.target_branch,
 			assigneeName
 		),
 		attachments: [attachment]
@@ -62,12 +68,12 @@ module.exports = function (data) {
 	// Start the fallback with the title.
 	attachment.fallback = attachment.title;
 
-	switch (mergeRequestDetails.action) {
+	switch (mr.action) {
 		case 'open':
 		case 'reopen':
 			// Open and re-open are the only ones that get the full merge request description.
-			attachment.fallback += '\n' + mergeRequestDetails.description;
-			attachment.text = helpers.convertMarkdownToSlack(description, mergeRequestDetails.source.web_url);
+			attachment.fallback += '\n' + mr.description;
+			attachment.text = helpers.convertMarkdownToSlack(description, mr.source.web_url);
 
 			break;
 	}
@@ -75,23 +81,21 @@ module.exports = function (data) {
 	debug('Message handled.');
 
 	output.__kind = module.exports.KIND;
-	// There's no async in this function, but we have to maintain the contract.
-	return Promise.resolve(output);
+
+	return output;
 };
 
-Object.defineProperties(
-	module.exports,
-	{
-		KIND: {
-			enumerable: true,
-			value: Object.freeze({
-				name: 'merge_request',
-				title: 'Merge Request'
-			})
-		},
-		COLOR: {
-			enumerable: true,
-			value: '#31B93D'
-		}
-	}
-);
+/**
+ * Provides metadata for this kind of handler.
+ * @type {HandlerKind}
+ */
+module.exports.KIND = Object.freeze({
+	name: 'merge_request',
+	title: 'Merge Request'
+});
+
+/**
+ * The color for this kind of handler.
+ * @type {string}
+ */
+module.exports.COLOR = '#31B93D';

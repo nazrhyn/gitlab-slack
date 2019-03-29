@@ -1,26 +1,19 @@
 'use strict';
 
-global._ = require('lodash');
-global.Promise = require('bluebird');
-global.path = require('path');
-
-global.__paths = {
-	base: path.join(__dirname, '../')
-};
-global.__paths.app = path.join(global.__paths.base, 'app');
-global.__paths.lib = path.join(global.__paths.app, 'lib');
-global.__paths.handlers = path.join(global.__paths.app, 'handlers');
-
-global.config = require(path.join(global.__paths.base, 'config'));
-
-const chalk = require('chalk'),
+const _ = require('lodash'),
+	chalk = require('chalk'),
+	/**
+	 * @type {Configuration}
+	 */
+	config = require('../config'),
 	debugCreate = require('debug'),
-	{ GitLabApi } = require(path.join(global.__paths.lib, 'gitlabapi')),
-	handlers = require(global.__paths.handlers),
-	helpers = require(path.join(global.__paths.lib, 'helpers')),
-	server = require(path.join(global.__paths.lib, 'server'));
+	{ GitLabApi } = require('./lib/gitlabapi'),
+	handlers = require('./handlers'),
+	helpers = require('./lib/helpers'),
+	bluebird = require('bluebird'),
+	server = require('./lib/server');
 
-const api = new GitLabApi(global.config.gitLab.baseUrl, global.config.gitLab.apiToken),
+const api = new GitLabApi(config.gitLab.baseUrl, config.gitLab.apiToken),
 	debug = debugCreate('gitlab-slack:app');
 
 let gitLabSlack;
@@ -38,27 +31,28 @@ process.on('SIGTERM', function () {
 	return _terminate();
 });
 
-Promise.config({
+bluebird.config({
 	longStackTraces: true
 });
 
-Promise.coroutine(function* () {
+(async function () {
 	debug('Starting up...');
 
-	if (!global.config.gitLab.projects || !global.config.gitLab.projects.length) {
-		debug('No projects defined in configuration. Terminating...');
-		return;
+	if (!config.gitLab.projects || !config.gitLab.projects.length) {
+		// Make sure this gets logged somehow.
+		(debug.enabled ? debug : console.error)(chalk`{red ERROR} No projects defined in configuration. Terminating...`);
+		process.exit(1);
 	}
 
 	// Be nice and add the # character to channels in project configuration if it's not there.
-	for (const project of global.config.gitLab.projects) {
+	for (const project of config.gitLab.projects) {
 		if (project.channel && !project.channel.startsWith('#')) {
 			project.channel = '#' + project.channel;
 		}
 	}
 
-	const projectConfigs = new Map(_.map(global.config.gitLab.projects, p => [p.id, p])),
-		{ labelColors, issueLabels } = yield _buildIssueLabelCaches();
+	const projectConfigs = new Map(_.map(config.gitLab.projects, p => [p.id, p])),
+		{ labelColors, issueLabels } = await _buildIssueLabelCaches();
 
 	gitLabSlack = server.createServer(
 		data => handlers.handleMessage(
@@ -76,28 +70,29 @@ Promise.coroutine(function* () {
 		_terminate();
 	});
 
-	gitLabSlack.listen(global.config.port);
+	gitLabSlack.listen(config.port);
 
 	debug('Startup complete.');
 })()
 	.catch(function (err) {
-		debug(chalk`{red ERROR} Processing failure in main branch. ! {red %s}${'\n'}     {blue Stack} %s`, err.message, err.stack);
-		_terminate();
+		// Make sure this gets logged somehow.
+		(debug.enabled ? debug : console.error)(chalk`{red ERROR} Processing failure in main branch. ! {red %s}\n{blue Stack} %s`, err.message, err.stack);
+		_terminate(1);
 	});
 
 // region ---- HELPER FUNCTIONS --------------------
 
 /**
  * Caches project and issue labels for projects with label-tracking enabled.
- * @returns {Promise<{ projectLabelCaches: Map, issueLabelCaches: Map }>} The issue and label caches.
+ * @returns {Promise<{ labelColors: Map, issueLabels: Map }>} The issue and label caches.
  * @private
  */
-function _buildIssueLabelCaches() {
+async function _buildIssueLabelCaches() {
 	const cachers = [],
-		labelColors = new Map(),
-		issueLabels = new Map();
+		issueLabels = new Map(),
+		labelColors = new Map();
 
-	_.each(global.config.gitLab.projects, function (project) {
+	_.each(config.gitLab.projects, function (project) {
 		// For the label patterns that aren't already regex, compile them.
 		_.each(project.labels, function (label, index) {
 			if (!_.isRegExp(label)) {
@@ -106,13 +101,13 @@ function _buildIssueLabelCaches() {
 		});
 
 		if (_.size(project.labels)) {
-			const cacher = Promise.coroutine(function* () {
+			const cacher = async function buildProjectCache() {
 				debug(chalk`{cyan CACHE}[{cyanBright %d}] Caching information for {blue %d} / {blue %s}...`, project.id, project.id, project.name || '<no-name>');
 
 				// region ---- CACHE PROJECT LABEL COLORS --------------------
 
 				const projectLabelColors = new Map(),
-					projectLabels = yield api.getLabels(project.id);
+					projectLabels = await api.getLabels(project.id);
 
 				let projectLabelsCached = 0;
 
@@ -135,7 +130,7 @@ function _buildIssueLabelCaches() {
 					totalIssuePages = 0;
 
 				while (!totalIssuePages || currentIssuePage < totalIssuePages) {
-					const result = yield api.getOpenIssues(project.id, currentIssuePage);
+					const result = await api.getOpenIssues(project.id, currentIssuePage);
 
 					if (!result.data.length) {
 						break;
@@ -166,26 +161,29 @@ function _buildIssueLabelCaches() {
 				issueLabels.set(project.id, projectIssueLabels);
 
 				debug(chalk`{cyan CACHE}[{cyanBright %d}] Cached all issue and label information.`, project.id);
-			});
+			};
 
 			cachers.push(cacher());
 		}
 	});
 
-	return Promise.all(cachers).return({ labelColors, issueLabels });
+	await Promise.all(cachers);
+
+	return { labelColors, issueLabels };
 }
 
 /**
  * Terminates the service.
+ * @param {Number} exitCode The exit code. (default = 0)
  */
-function _terminate() {
+function _terminate(exitCode = 0) {
 	debug('Terminating...');
 	if (gitLabSlack && gitLabSlack.listening) {
 		gitLabSlack.close(function () {
-			process.exit(0);
+			process.exit(exitCode);
 		});
 	} else {
-		process.exit(0);
+		process.exit(exitCode);
 	}
 }
 

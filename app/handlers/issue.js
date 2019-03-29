@@ -1,8 +1,13 @@
 'use strict';
 
-const chalk = require('chalk'),
+const _ = require('lodash'),
+	chalk = require('chalk'),
+	/**
+	 * @type {Configuration}
+	 */
+	config = require('../../config'),
 	debugCreate = require('debug'),
-	helpers = require(path.join(global.__paths.lib, 'helpers')),
+	helpers = require('../lib/helpers'),
 	util = require('util');
 
 const debug = debugCreate('gitlab-slack:handler:issue');
@@ -16,37 +21,39 @@ const debug = debugCreate('gitlab-slack:handler:issue');
  */
 function _addLabelChangeAttachments(projectLabelColors, attachments, action, labels) {
 	for (const label of labels) {
+		/* eslint-disable camelcase */ // Required property naming.
 		attachments.push({
 			fallback: util.format('%s label %s', action, label),
 			text: util.format('_%s_ label *%s*', action, label),
 			color: projectLabelColors.get(label),
 			mrkdwn_in: ['text']
 		});
+		/* eslint-enable camelcase */
 	}
 }
 
 /**
  * Handles an issue message.
  * @param {Map} projectConfigs A map of project ID to project configuration.
- * @param {Map} projectLabelCaches A map of project ID to a map of labels to label colors.
- * @param {Map} issueLabelCaches A map of project ID to a map of issue ID to issue labels.
+ * @param {Map} labelColors A map of project ID to a map of labels to label colors.
+ * @param {Map} issueLabels A map of project ID to a map of issue ID to issue labels.
  * @param {GitLabApi} api The GitLab API.
  * @param {Object} data The message data.
  * @returns {Promise<Object|undefined>} A promise that will be resolved with the output data structure.
  */
-module.exports = Promise.coroutine(function* (projectConfigs, labelColors, issueLabels, api, data) {
+module.exports = async function (projectConfigs, labelColors, issueLabels, api, data) {
 	debug('Handling message...');
 
 	const issueDetails = data.object_attributes,
 		projectConfig = projectConfigs.get(issueDetails.project_id),
 		projectLabelsTracked = !!projectConfig && !!_.size(projectConfig.labels),
 		assignee = data.assignees && data.assignees[0], // If assigned, take the first; otherwise, it'll be undefined.
-		author = yield api.getUserById(issueDetails.author_id);
+		author = await api.getUserById(issueDetails.author_id);
 
 	let milestone;
 
 	if (issueDetails.milestone_id) {
-		milestone = yield api.getMilestone(issueDetails.project_id, issueDetails.milestone_id);
+		milestone = await api.getMilestone(issueDetails.project_id, issueDetails.milestone_id);
 	}
 
 	let projectLabelColors, projectIssueLabels, matchingIssueLabels, addedLabels, removedLabels;
@@ -101,7 +108,7 @@ module.exports = Promise.coroutine(function* (projectConfigs, labelColors, issue
 		milestoneName = '_none_';
 
 	if (assignee) {
-		assigneeName = util.format('<%s/u/%s|%s>', global.config.gitLab.baseUrl, assignee.username, assignee.username);
+		assigneeName = util.format('<%s/u/%s|%s>', config.gitLab.baseUrl, assignee.username, assignee.username);
 	}
 
 	if (milestone) {
@@ -110,18 +117,19 @@ module.exports = Promise.coroutine(function* (projectConfigs, labelColors, issue
 
 	const text = util.format(
 			'[%s] <%s/u/%s|%s> %s issue *#%s* — *assignee:* %s — *milestone:* %s — *creator:* <%s/u/%s|%s>',
-			data.repository.name,
-			global.config.gitLab.baseUrl,
+			data.project.path_with_namespace,
+			config.gitLab.baseUrl,
 			data.user.username,
 			data.user.username,
 			verb,
 			issueDetails.iid,
 			assigneeName,
 			milestoneName,
-			global.config.gitLab.baseUrl,
+			config.gitLab.baseUrl,
 			author.username,
 			author.username
 		),
+		/* eslint-disable camelcase */ // Required property naming.
 		output = {
 			text,
 			attachments: []
@@ -137,6 +145,7 @@ module.exports = Promise.coroutine(function* (projectConfigs, labelColors, issue
 			color: module.exports.COLOR,
 			mrkdwn_in: ['title', 'text']
 		};
+		/* eslint-enable camelcase */
 
 	// Add the main attachment; all action types include some form of this.
 	output.attachments.push(mainAttachment);
@@ -174,21 +183,19 @@ module.exports = Promise.coroutine(function* (projectConfigs, labelColors, issue
 
 	output.__kind = module.exports.KIND;
 	return output;
+};
+
+/**
+ * Provides metadata for this kind of handler.
+ * @type {HandlerKind}
+ */
+module.exports.KIND = Object.freeze({
+	name: 'issue',
+	title: 'Issue'
 });
 
-Object.defineProperties(
-	module.exports,
-	{
-		KIND: {
-			enumerable: true,
-			value: Object.freeze({
-				name: 'issue',
-				title: 'Issue'
-			})
-		},
-		COLOR: {
-			enumerable: true,
-			value: '#F28A2B'
-		}
-	}
-);
+/**
+ * The color for this kind of handler.
+ * @type {string}
+ */
+module.exports.COLOR = '#F28A2B';

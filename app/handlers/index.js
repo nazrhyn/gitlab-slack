@@ -1,33 +1,42 @@
 'use strict';
 
-const chalk = require('chalk'),
+const _ = require('lodash'),
+	bluebird = require('bluebird'),
+	chalk = require('chalk'),
 	debugCreate = require('debug'),
-	helpers = require(path.join(global.__paths.lib, 'helpers')),
-	rp = require('request-promise'),
-	slack = require(path.join(global.__paths.lib, 'slack')),
+	helpers = require('../lib/helpers'),
+	slack = require('../lib/slack'),
+	supportsColor = require('supports-color'),
 	util = require('util');
 
-const handleIssue = require(path.join(global.__paths.handlers, 'issue')),
-	handleBranch = require(path.join(global.__paths.handlers, 'branch')),
-	handleCommit = require(path.join(global.__paths.handlers, 'commit')),
-	handleTag = require(path.join(global.__paths.handlers, 'tag')),
-	handleMergeRequest = require(path.join(global.__paths.handlers, 'mergeRequest')),
-	handleWikiPage = require(path.join(global.__paths.handlers, 'wikiPage'));
+const handleIssue = require('./issue'),
+	handleBranch = require('./branch'),
+	handleCommit = require('./commit'),
+	handleTag = require('./tag'),
+	handleMergeRequest = require('./mergeRequest'),
+	handleWikiPage = require('./wikiPage');
 
 const debug = debugCreate('gitlab-slack:handler');
 
 const REGEX_ALL_ZEROES = /^0+$/;
 
 /**
+ * The kind metadata.
+ * @typedef {Object} HandlerKind
+ * @property {String} name The internal name.
+ * @property {String} title The display title.
+ */
+
+/**
  * Handles an incoming message.
  * @param {Map} projectConfigs A map of project ID to project configuration.
- * @param {Map} projectLabelCaches A map of project ID to a map of labels to label colors.
- * @param {Map} issueLabelCaches A map of project ID to a map of issue ID to issue labels.
+ * @param {Map} labelColors A map of project ID to a map of labels to label colors.
+ * @param {Map} issueLabels A map of project ID to a map of issue ID to issue labels.
  * @param {GitLabApi} api The GitLab API.
  * @param {Object} data The message data.
  * @returns {Promise} A promise that will be resolved when the message was handled.
  */
-exports.handleMessage = Promise.coroutine(function* (projectConfigs, labelColors, issueLabels, api, data) {
+exports.handleMessage = async function (projectConfigs, labelColors, issueLabels, api, data) {
 	let outputs;
 
 	if (data.object_kind) {
@@ -37,34 +46,36 @@ exports.handleMessage = Promise.coroutine(function* (projectConfigs, labelColors
 
 		switch (data.object_kind) {
 			case handleIssue.KIND.name:
-				outputs = yield handleIssue(projectConfigs, labelColors, issueLabels, api, data);
+				outputs = await handleIssue(projectConfigs, labelColors, issueLabels, api, data);
 				break;
 			case handleBranch.KIND.name:
 			case handleCommit.KIND.name: {
 				if (beforeZero || afterZero) {
 					// If before or after is all zeroes, this is a branch being pushed.
-					outputs = yield handleBranch(data, beforeZero, afterZero);
+					outputs = await handleBranch(data, beforeZero, afterZero);
 
 					if (beforeZero) {
 						// If before is zero, it's a new branch; we also want to handle any
-						//  commits that came with it.
-						outputs = [outputs, yield handleCommit(api, data)];
+						//  commits that came with it. We tell the commit handler to filter
+						//  the commits so that we don't include commits irrelevant to this push.
+						outputs = [outputs, await handleCommit(api, data, true)];
 					}
 				} else {
-					outputs = yield handleCommit(api, data);
+					outputs = await handleCommit(api, data);
 				}
 				break;
 			}
 			case handleTag.KIND.name:
-				outputs = yield handleTag(data, beforeZero, afterZero);
+				outputs = await handleTag(data, beforeZero, afterZero);
 				break;
 			case handleMergeRequest.KIND.name:
-				outputs = yield handleMergeRequest(data);
+				outputs = await handleMergeRequest(data);
 				break;
 			case handleWikiPage.KIND.name:
-				outputs = yield handleWikiPage(data);
+				outputs = await handleWikiPage(data);
 				break;
 			default:
+				/* eslint-disable camelcase */ // Required property naming.
 				// Unhandled/unrecognized messages go to the default channel for the webhook
 				//  as a kind of notification that something unexpected came through.
 				outputs = {
@@ -77,6 +88,7 @@ exports.handleMessage = Promise.coroutine(function* (projectConfigs, labelColors
 						mrkdwn_in: ['text']
 					}]
 				};
+				/* eslint-enable camelcase */
 				break;
 		}
 	}
@@ -90,11 +102,11 @@ exports.handleMessage = Promise.coroutine(function* (projectConfigs, labelColors
 	if (!outputs.length) {
 		// If we get here and there's nothing to output, that means none of the handlers processed the message.
 		debug(chalk`{cyanBright IGNORED} No handler processed the message.`);
-		console.log(chalk`{cyanBright IGNORED} {yellow Message Body ---------------------}`, '\n', util.inspect(data, { colors: true, depth: 5 }));
+		console.log(chalk`{cyanBright IGNORED} {yellow Message Body ---------------------}`, '\n', util.inspect(data, { colors: supportsColor.stdout.level > 0, depth: 5 }));
 		return;
 	}
 
-	const projectId = yield helpers.getProjectId(data, api),
+	const projectId = await helpers.getProjectId(data, api),
 		projectConfig = projectConfigs.get(projectId);
 
 	if (projectConfig && projectConfig.channel) {
@@ -106,5 +118,5 @@ exports.handleMessage = Promise.coroutine(function* (projectConfigs, labelColors
 	}
 
 	// Send all the outputs to Slack and we're done.
-	yield Promise.map(outputs, output => slack.send(output));
-});
+	await bluebird.map(outputs, output => slack.send(output));
+};
