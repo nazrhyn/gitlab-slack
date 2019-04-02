@@ -1,3 +1,29 @@
+## 2.1.0 / 2018-03-27
+* Remove the use of global `_`, `path`, `config` and the `Promise` override
+   * Switch to using relative path requires for everything
+* Remove strange `Object.defineProperty` thing from handlers
+* Remove `WeakMap` "privates" pattern; I don't think I like it
+* Update all NPM dependencies to latest versions
+   * Fix all package vulnerabilities
+* Update ESLint rules to a **5.15.x** set
+* Update branch name parsing to allow for branches with a `/` character in the name
+* Update all notifications to refer to the project by its `path_with_namespace` (Fixes #26)
+* Normalize GitLab webhook and API result property uses in several cases
+* Change to present tense in changelog (!)
+* Change all **Bluebird** coroutines to `async`/`await` and default to native promises
+   * Some **Bluebird** helper functions are still used
+* Change failure during initialization to exit with `1` (Fixes #24)
+   * Improve error reporting for various failures of GitLab API configuration
+* Change how source/target branch links are built in **merge request** notifications (Fixes #23)
+* Change the **commit** notification that accompanies a new **branch** notification to only include any initial, contiguous block of commits made by the user who pushed. If no commits are left after this filtering, no notification is made. (Fixes #28)
+* Change uses of `util.inspect` to only print colors if **supports-color** says it should
+* Add local ngrok configuration and NPM script for local development
+* Add more settings to the .editorconfig
+* Add **tag** notification for moved tags
+* Add **commit** summary of mentioned merge requests as `/!\d+/` (Fixes #25)
+* Add comprehensive JSDoc for config
+* Add systemd unit script example
+
 ## 2.0.1 / 2017-07-24
 * Fixed issue with filename casing
 

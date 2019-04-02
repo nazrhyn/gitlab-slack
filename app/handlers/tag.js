@@ -1,7 +1,10 @@
 'use strict';
 
-const chalk = require('chalk'),
-	debugCreate = require('debug'),
+const debugCreate = require('debug'),
+	/**
+	 * @type {Configuration}
+	 */
+	config = require('../../config'),
 	util = require('util');
 
 const debug = debugCreate('gitlab-slack:handler:tag');
@@ -13,7 +16,7 @@ const debug = debugCreate('gitlab-slack:handler:tag');
  * @param {Boolean} afterZero Indicates whether the after hash is all zeroes.
  * @returns {Promise<Object>} A promise that will be resolved with the output data structure.
  */
-module.exports = function (data, beforeZero, afterZero) {
+module.exports = async function (data, beforeZero, afterZero) {
 	debug('Handling message...');
 
 	let action = '[unknown]';
@@ -22,14 +25,16 @@ module.exports = function (data, beforeZero, afterZero) {
 		action = 'pushed new tag';
 	} else if (afterZero) {
 		action = 'deleted tag';
+	} else {
+		action = 'moved tag';
 	}
 
-	const tag = data.ref.substr(data.ref.lastIndexOf('/') + 1),
+	const tag = data.ref.replace('refs/tags/', ''),
 		output = {
 			text: util.format(
 				'[%s] <%s/u/%s|%s> %s <%s/commits/%s|%s>',
-				data.repository.name,
-				global.config.gitLab.baseUrl,
+				data.project.path_with_namespace,
+				config.gitLab.baseUrl,
 				data.user_username,
 				data.user_username,
 				action,
@@ -51,23 +56,21 @@ module.exports = function (data, beforeZero, afterZero) {
 	debug('Message handled.');
 
 	output.__kind = module.exports.KIND;
-	// There's no async in this function, but we have to maintain the contract.
-	return Promise.resolve(output);
+
+	return output;
 };
 
-Object.defineProperties(
-	module.exports,
-	{
-		KIND: {
-			enumerable: true,
-			value: Object.freeze({
-				name: 'tag_push',
-				title: 'Tag'
-			})
-		},
-		COLOR: {
-			enumerable: true,
-			value: '#5DB5FD'
-		}
-	}
-);
+/**
+ * Provides metadata for this kind of handler.
+ * @type {HandlerKind}
+ */
+module.exports.KIND = Object.freeze({
+	name: 'tag_push',
+	title: 'Tag'
+});
+
+/**
+ * The color for this kind of handler.
+ * @type {string}
+ */
+module.exports.COLOR = '#5DB5FD';

@@ -1,0 +1,16 @@
+[Unit]
+Description=gitlab-slack service
+After=gitlab-runsvdir.service
+
+[Service]
+Type=simple
+Environment=DEBUG=gitlab-slack:*
+WorkingDirectory=/opt/gitlab-slack
+Restart=on-failure
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=gitlab-slack
+ExecStart=/usr/bin/npm start
+
+[Install]
+WantedBy=multi-user.target

@@ -1,7 +1,7 @@
-# gitlab-slack init.d script
+# gitlab-slack init.d Script
 
 This is the **init.d** bash script for the **gitlab-slack** service.
 
-### Source
+## Source
 
 This script is modified from [node-startup](https://github.com/chovy/node-startup), a generic node app service script.

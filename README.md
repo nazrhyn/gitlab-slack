@@ -4,7 +4,7 @@
 ### Features
 * Processes GitLab webhook messages for **commits**, **branches**, **tags**, **issues**, **merge requests** and **wiki pages**. ([more info](#attractive-and-functional-notifications))
 * Provides translation from Markdown to Slack's formatting syntax for the formatting features that Slack supports. ([more info](#markdown-to-slack-formatting-translation))
-* Issues mentioned anywhere in the commit message are aggregated and provided as links to the right of the commit summary line. ([more info](#issue-mention-summary))
+* Issues or merge requests mentioned anywhere in the commit message are aggregated and provided as links to the right of the commit summary line. ([more info](#mention-summary))
 * Changes to tracked labels on issues are notified as issue updates with a summary of label changes as attachments. ([more info](#issue-label-change-tracking))
 * Status and error messages are logged to `stderr`; if the terminal supports colors, they are output for improved readability. ([more info](#configuring-logging))
 
@@ -12,9 +12,9 @@
 * **GitLab API Token**   
   The GitLab API token must have administrative privileges to be able to search for users by email address. This is used to translate the commit author email address into a username.
 * **GitLab and GitLab API Version**   
-  The GitLab API interactions were written for **v4** of their API against GitLab version **9.3**. Older or newer versions _may_ work, but are unsupported.
+  The GitLab API interactions were written for **v4** of their API against GitLab version **11.x**. Older or newer versions _may_ work, but are unsupported.
 * **Node.js and NPM Version**   
-  The code is written targeting Node.js **6.x LTS** and NPM **5.x**. Older or newer versions _may_ work, but are unsupported.
+  The code is written targeting Node.js **8.x LTS** and NPM **6.x**. Older or newer versions _may_ work, but are unsupported.
 
 ### Configuration Syntax
 **gitlab-slack** is configured by values in the `config.js` file in the application directory. This file is ingested as a Node.js module and has the following structure:
@@ -60,59 +60,62 @@ module.exports = {
 while cutting the fat and remaining as concise as possible.
  
 #### Commits
-![Commit Notification](https://user-images.githubusercontent.com/1672405/28470411-a2445fe2-6e07-11e7-82d7-371db52245a6.png)    
-Commit notifications include the repository name and branch, the username of the user who pushed the commit as a link and
-a list of commits included in the push. Each commit includes the username of the user who made it, the short-form commit hash
-as a link, the first line of the commit message, and a summary of all issues mentioned in the commit message. ([more info](#issue-mention-summary))
+![Commit Notification](https://user-images.githubusercontent.com/1672405/55261990-d2d4ee80-5242-11e9-8b93-68ee3088a98c.png)    
+Commit notifications include the repository path and branch, the username of the user who pushed the commit as a link and
+a list of commits included in the push. Each commit includes the username of the user who made it, a short-form commit hash
+as a link, the first line of the commit message, and a summary of all mentions in the commit message. ([more info](#mention-summary))
 
 #### Tags and Branches
-![Tag and Branch Notifications](https://user-images.githubusercontent.com/1672405/28471919-bbd1c6de-6e0c-11e7-80b2-03f459ed928a.png)    
-Tag and branch notifications include the repository name, the username of the user who pushed them as a link and the branch or
+![Tag and Branch Notifications](https://user-images.githubusercontent.com/1672405/55262004-db2d2980-5242-11e9-8323-7e3f4a08c8ee.png)    
+Tag and branch notifications include the repository path, the username of the user who pushed them as a link and the branch or
 tag name as a link.
 
 If any commits are included in the new-branch message, they are also notified. If a tag includes a message, it is included below the tag.
 
 #### Issues
-![Issue Notifications](https://user-images.githubusercontent.com/1672405/28472252-dba6bffe-6e0d-11e7-9e89-9c40980b78fe.png)    
-Issue notifications include the repository name, the username of the user who performed the issue action, the username of the user to
+![Issue Notifications](https://user-images.githubusercontent.com/1672405/55262018-e84a1880-5242-11e9-85a6-4dab51e84d4c.png)    
+Issue notifications include the repository path, the username of the user who performed the issue action, the username of the user to
 whom the issue is assigned, the milestone to which the issue is assigned and the username of the user who created the issue.
-Milestones and usernames are formatted as a link. Issue notifications include a main attachment that includes the title of the issue,
-as a link and, depending on the kind of action, also the issue description. Additional attachments will be included for changes
-to tracked labels. ([more info](#issue-label-tracking)
+Milestones and usernames are formatted as a links. Issue notifications include a main attachment that includes the title of the issue,
+and, depending on the kind of action, also the issue description. Additional attachments will be included for changes
+to tracked labels. ([more info](#issue-label-change-tracking)
 
 #### Merge Requests
-![Merge Request Notification](https://user-images.githubusercontent.com/1672405/28478482-92f28e8c-6e26-11e7-83f1-588067aa360f.png)   
-Merge request notifications include the repository name, the username of the user who performed the merge request action, the username
-of the user to whom the merge request is assigned, the source branch and the target branch. Merge request notifications include an
-attachment that includes the title of the merge request and, depending on the kind of action, also the first line of its description.
+![Merge Request Notification](https://user-images.githubusercontent.com/1672405/55262028-f13aea00-5242-11e9-8277-d035688c5ea2.png)   
+Merge request notifications include the repository path, the username of the user who performed the merge request action, the username
+of the user to whom the merge request is assigned, the source branch and the target branch. Usernames and branches are formatted as links.
+Merge request notifications include an attachment that includes the title of the merge request and, depending on the kind of action,
+also the first line of its description.
 
 #### Wiki Page
-![Wiki Page Notification](https://user-images.githubusercontent.com/1672405/28478720-9873109c-6e27-11e7-9648-2eaebfd62520.png)   
-Wiki page notifications include the repository name, the username of the user who performed the wiki page action and the slug of
+![Wiki Page Notification](https://user-images.githubusercontent.com/1672405/55262039-f7c96180-5242-11e9-8835-09b2140403a4.png)   
+Wiki page notifications include the repository path, the username of the user who performed the wiki page action and the slug of
 the affected wiki page as a link to that page.
 
-### Issue Mention Summary
-As commit messages are truncated to their first line for notification, any issues mentioned elsewhere in the message are
-summarized as a link at the end of the notified commit message. The following two commit messages...
+### Mention Summary
+As commit messages are truncated to their first line for notification, any **issues** or **merge requests** mentioned elsewhere in the message are
+de-duplicated and summarized as links at the end of the notified commit message. The following two commit messages...
 
 ```text
-Removed the fun file (#8)
-* Fixed an issue where there was a fun file.
+Removes the fun file (#8, !6)
+
+* Fixes an issue where there was a fun file.
 ```
 
 ```text
-Added a fun file.
+Adds a fun file.
 
 * This is more description.
-* Fixed an issue with not having a fun file. (#3, #6)
-* Fixed another issue. (#1)
+* Fixes an issue with not having a fun file. (#3, #6, !6)
+* Fixes another issue. (#3, !6)
+* This line only mentions a merge request. (!5)
 ```
 
-...produce the following notification...
+...produce the following notification:
 
-![Commit Message Issue Summary](https://user-images.githubusercontent.com/1672405/28476839-7e73f48e-6e1f-11e7-87a1-ed857c95268d.png)
+![Commit Message Mention Summary](https://user-images.githubusercontent.com/1672405/55262205-77573080-5243-11e9-9494-082d8e5a4bd8.png)
 
-When the issue mention is in the first line, the original issue mention is removed to avoid duplication.
+When the mention was in the first line, the original mention is removed to avoid duplication.
 
 ### Markdown to Slack Formatting Translation
 The following Markdown structures will be translated to a Slack-formatting analogue:
@@ -142,7 +145,7 @@ Do you like pictures?
 ```
 ...produces an issue notification similiar to the following...   
  
-![Markdown to Slack Formatting](https://user-images.githubusercontent.com/1672405/28475174-4360c5da-6e19-11e7-9140-fa694ea2a3e6.png)
+![Markdown to Slack Formatting](https://user-images.githubusercontent.com/1672405/55262249-981f8600-5243-11e9-98a3-0daabc0f3fec.png)
 
 Headings are simply bolded; those that are already bolded are handled appropriately. Images are processed into simple links; they do
 not include the base host/protocol/port of the GitLab instance, so that is added.
@@ -153,7 +156,7 @@ converted to case-insensitive regular expressions) defining which labels **gitla
 label changes will be notified in additional attachments following the main summary attachment. Each label attachment will follow
 the label's configured color and indicate whether the label was _Added_ or _Removed_.
 
-![Issue Label Change Tracking](https://user-images.githubusercontent.com/1672405/28475492-79ba968c-6e1a-11e7-880f-0f0a3985bfe0.png)
+![Issue Label Change Tracking](https://user-images.githubusercontent.com/1672405/55262271-ac638300-5243-11e9-9c28-1d39b89dc6e4.png)
 
 ### Configuring Logging
 The [debug](https://github.com/visionmedia/debug) module is used for logging under the prefix `gitlab-slack`. The logging is split
@@ -165,7 +168,7 @@ into the following components:
 | `server` | The HTTP server that handles incoming webhook requests. |
 | `api` | The wrapper that handles communication with the GitLab API. |
 | `slack` | The wrapper that handles sending notifications to the Slack incoming webhook. |
-| `handler` | A set of components that handle incoming messages of various types. Sub-components are logged as `gitlab-slack:handler:<sub>`.<br>**Sub-Components**: `commit`, `branch`, `tag`, `issue`, `mergerequest`, `wikipage` |
+| `handler` | A set of components that handle incoming messages of various types. Sub-components are logged as `gitlab-slack:handler:<sub>`.<br><br>**Sub-Components**: `commit`, `branch`, `tag`, `issue`, `mergerequest`, `wikipage` |
 
 To turn on or off logging of components, assign the `DEBUG` environment variable. For example, to only show handler log messages, set
 `DEBUG` to `gitlab-slack:handler:*`. Read the documentation for **debug** for more information.

@@ -1,6 +1,7 @@
 'use strict';
 
-const chalk = require('chalk'),
+const _ = require('lodash'),
+	chalk = require('chalk'),
 	debugCreate = require('debug'),
 	http = require('http'),
 	rp = require('request-promise'),
@@ -9,8 +10,7 @@ const chalk = require('chalk'),
 const API_BASE_ROUTE = '/api/v4',
 	ROUTE_PARAM_PATTERN = /:([^/:]+)/g;
 
-const debug = debugCreate('gitlab-slack:api'),
-	privates = new WeakMap();
+const debug = debugCreate('gitlab-slack:api');
 
 /**
  * Defines a wrapper for the GitLab API.
@@ -22,26 +22,8 @@ class GitLabApi {
 	 * @param {String} token The API token.
 	 */
 	constructor(baseUrl, token) {
-		privates.set(this, {
-			baseUrl: baseUrl + API_BASE_ROUTE,
-			token
-		});
-	}
-
-	/**
-	 * The API base URL.
-	 * @returns {String} The base URL.
-	 */
-	get baseUrl() {
-		return privates.get(this).baseUrl;
-	}
-
-	/**
-	 * The API token.
-	 * @returns {String} The API token.
-	 */
-	get token() {
-		return privates.get(this).token;
+		this._baseUrl = baseUrl + API_BASE_ROUTE;
+		this._token = token;
 	}
 
 	/**
@@ -65,10 +47,12 @@ class GitLabApi {
 		// The provided search terms should not be returning more than 100 users.
 		return this.sendRequest(
 			'/users',
+			/* eslint-disable camelcase */ // Required property naming.
 			{
 				per_page: 100,
 				search
 			}
+			/* eslint-enable camelcase */
 		);
 	}
 
@@ -110,10 +94,12 @@ class GitLabApi {
 		// Technically the labels API is paginated, but who has more than 100 labels?
 		return this.sendRequest(
 			'/projects/:projectId/labels',
+			/* eslint-disable camelcase */ // Required property naming.
 			{
 				per_page: 100,
 				projectId
 			}
+			/* eslint-enable camelcase */
 		);
 	}
 
@@ -137,18 +123,19 @@ class GitLabApi {
 	 * @param {Number} [page] The page to get. (default = `1`)
 	 * @returns {Promise<{ data: *, page: Number, totalPages: Number }>} A promise that will be resolved with the paginated result.
 	 */
-	sendPaginatedRequest(route, params = {}, page = 1) {
+	async sendPaginatedRequest(route, params = {}, page = 1) {
+		/* eslint-disable camelcase */ // Required property naming.
 		params.per_page = 100;
 		params.page = page;
+		/* eslint-enable camelcase */
 
-		return this.sendRequest(route, params, true)
-			.then(function (response) {
-				return {
-					data: response.body,
-					page: parseInt(response.headers['x-page'], 10),
-					totalPages: parseInt(response.headers['x-total-pages'], 10)
-				};
-			});
+		const response = await this.sendRequest(route, params, true);
+
+		return {
+			data: response.body,
+			page: parseInt(response.headers['x-page'], 10),
+			totalPages: parseInt(response.headers['x-total-pages'], 10)
+		};
 	}
 
 	/**
@@ -158,7 +145,7 @@ class GitLabApi {
 	 * @param {Boolean} [full] Indicates whether the full response should be returned.
 	 * @returns {Promise<*>} A promise that will be resolved with the API result.
 	 */
-	sendRequest(route, params, full) {
+	async sendRequest(route, params, full) {
 		if (!route) {
 			throw new Error('GitLabApi sendRequest - route is required.');
 		}
@@ -186,35 +173,44 @@ class GitLabApi {
 			debug(chalk`{cyan SEND} -> GET {gray %s} %o`, filledRoute, !_.isEmpty(params) ? params : undefined);
 		}
 
-		return rp({
-			url: this.baseUrl + filledRoute,
-			qs: params,
-			headers: {
-				Accept: 'application/json',
-				'PRIVATE-TOKEN': this.token
-			},
-			json: true,
-			rejectUnauthorized: false,
-			resolveWithFullResponse: true
-		})
-			.promise() // Convert to Bluebird promise.
-			.then(function (response) {
-				debug(chalk`{cyan RECV} <- GET {gray %s} -> {green %d %s}`, filledRoute, response.statusCode, http.STATUS_CODES[response.statusCode]);
-
-				return full ? response : response.body;
-			})
-			.catch(function (err) {
-				const output = err.response.toJSON(),
-					message = output.body.error || output.body.message || output.body;
-
-				const failure = new Error(`GitLabApi ${filledRoute} - ${message}`);
-				failure.statusCode = err.statusCode;
-
-				debug(chalk`{red FAIL} <- GET {gray %s} -> {red %d %s} ! %s`, filledRoute, failure.statusCode, http.STATUS_CODES[failure.statusCode], message);
-				console.log(chalk`{red FAIL} {yellow Response Body ---------------------}`, '\n', util.inspect(output, { colors: true, depth: 5 }));
-
-				throw failure;
+		try {
+			const response = await rp({
+				url: this._baseUrl + filledRoute,
+				qs: params,
+				headers: {
+					Accept: 'application/json',
+					'Private-Token': this._token
+				},
+				json: true,
+				rejectUnauthorized: false,
+				resolveWithFullResponse: true
 			});
+
+			debug(chalk`{cyan RECV} <- GET {gray %s} -> {green %d %s}`, filledRoute, response.statusCode, http.STATUS_CODES[response.statusCode]);
+
+			return full ? response : response.body;
+		} catch (e) {
+			let output, message;
+
+			if (!e.response) {
+				message = e.message;
+			} else {
+				output = e.response.toJSON();
+				message = output.body.error || output.body.message || output.body;
+			}
+
+			const failure = new Error(`GitLabApi ${filledRoute} - ${message}`);
+			failure.statusCode = e.statusCode;
+
+			if (output) {
+				debug(chalk`{red FAIL} <- GET {gray %s} -> {red %d} {redBright %s} ! %s`, filledRoute, failure.statusCode, http.STATUS_CODES[failure.statusCode], message);
+				console.log(chalk`{red FAIL} {yellow Response Body ---------------------}`, '\n', util.inspect(output, { colors: supportsColor.stdout.level > 0, depth: 5 }));
+			} else {
+				debug(chalk`{red FAIL} <- GET {gray %s} -> {red %s} ! %s`, filledRoute, e.name, message);
+			}
+
+			throw failure;
+		}
 	}
 }
 

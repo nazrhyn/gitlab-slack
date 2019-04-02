@@ -1,6 +1,7 @@
 'use strict';
 
-const chalk = require('chalk'),
+const _ = require('lodash'),
+	chalk = require('chalk'),
 	debugCreate = require('debug'),
 	http = require('http'),
 	util = require('util');
@@ -10,7 +11,7 @@ const debug = debugCreate('gitlab-slack:server');
 /**
  * Creates the HTTP server that handles webhooks.
  * @param {function(Object)} dataCallback The data callback.
- * @returns {http.Server} The HTTP server.
+ * @returns {module:http.Server} The HTTP server.
  */
 exports.createServer = function (dataCallback) {
 	debug('Creating server...');
@@ -37,7 +38,7 @@ exports.createServer = function (dataCallback) {
 	 manually destroy every remaining socket that's still open.
 	If we dont' do this, we have to wait for those socket connections to time out
 	 before the server will actually close.
-	 */
+	*/
 	server.on('connection', function (socket) {
 		sockets.push(socket);
 
@@ -47,7 +48,7 @@ exports.createServer = function (dataCallback) {
 	});
 
 	server.on('error', function (error) {
-		debug(chalk`{red ERROR} {redBright %s} ! %s`, error.code || 'UNKNOWN', error.message);
+		debug(chalk`{red ERROR} {redBright %s} Server error. ! {red %s}`, error.code || 'UNKNOWN', error.message);
 
 		// If we get a server error, just assume that we should close the server.
 		server.close();
@@ -66,7 +67,7 @@ exports.createServer = function (dataCallback) {
 	/*
 	Wrap the close function to destroy all remaining sockets before calling the
 	 real close function.
-	 */
+	*/
 	const _close = server.close;
 	server.close = function (cb) {
 		for (const socket of sockets) {
@@ -83,7 +84,7 @@ exports.createServer = function (dataCallback) {
 
 /**
  * Sends a failure response.
- * @param {http.ServerResponse} res The response.
+ * @param {module:http.ServerResponse} res The response.
  * @param {Number} statusCode The status code.
  * @param {String} [message] The message. (default = status code text)
  * @private
@@ -98,8 +99,8 @@ function _sendFailure(res, statusCode, message) {
 
 /**
  * Handles an incoming request.
- * @param {http.IncomingMessage} req The request.
- * @param {http.ServerResponse} res The response.
+ * @param {IncomingMessage} req The request.
+ * @param {module:http.ServerResponse} res The response.
  * @param {function(Object)} dataCallback The data callback.
  * @private
  */
@@ -131,7 +132,7 @@ function _handleRequest(req, res, dataCallback) {
 		} catch (e) {
 			debug(chalk`{red FAIL} Failed calling data handler. ! {red %s}`, e.message);
 			console.log(chalk`{red FAIL} {yellow Stack Trace ----------------------}`, '\n', e.stack);
-			console.log(chalk`{red FAIL} {yellow Message Body ---------------------}`, '\n', util.inspect(body, { colors: true, depth: 5 }));
+			console.log(chalk`{red FAIL} {yellow Message Body ---------------------}`, '\n', util.inspect(body, { colors: supportsColor.stdout.level > 0, depth: 5 }));
 			_sendFailure(res, 500);
 			return;
 		}
@@ -150,7 +151,7 @@ function _handleRequest(req, res, dataCallback) {
 			.catch(function (err) {
 				debug(chalk`{red FAIL} Failed handling data. ! {red %s}`, err.message);
 				console.log(chalk`{red FAIL} {yellow Stack Trace ----------------------}`, '\n', err.stack);
-				console.log(chalk`{red FAIL} {yellow Message Body ---------------------}`, '\n', util.inspect(body, { colors: true, depth: 5 }));
+				console.log(chalk`{red FAIL} {yellow Message Body ---------------------}`, '\n', util.inspect(body, { colors: supportsColor.stdout.level > 0, depth: 5 }));
 				_sendFailure(res, 500);
 			});
 	});

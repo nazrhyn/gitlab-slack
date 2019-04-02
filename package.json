@@ -1,30 +1,32 @@
 {
-	"name": "gitlab-slack",
 	"private": true,
-	"version": "2.0.2",
-	"description": "A service that receives hook notifications from GitLab and posts information to an incoming webhook on Slack.",
+	"name": "gitlab-slack",
+	"version": "2.1.0",
+	"description": "A service that receives webhook notifications from GitLab and posts information to an incoming webhook on Slack.",
+	"main": "app/app.js",
 	"author": "Chris Harwood",
 	"license": "MIT",
-	"main": "app/app.js",
 	"homepage": "https://github.com/nazrhyn/gitlab-slack",
 	"bugs": "https://github.com/nazrhyn/gitlab-slack/issues",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/nazrhyn/gitlab-slack.git"
 	},
+	"scripts": {
+		"start": "node app/app.js",
+		"ngrok": "ngrok start -config ~/.ngrok2/ngrok.yml -config ngrok.yml gs"
+	},
 	"engines": {
-		"node": ">=6.11.1 <7",
-		"npm": ">=5 <6"
+		"node": "8.x",
+		"npm": "6.x"
 	},
 	"dependencies": {
-		"bluebird": "^3.5.0",
-		"chalk": "^2.0.1",
-		"debug": "^2.6.8",
-		"lodash": "^4.17.4",
-		"request": "^2.81.0",
-		"request-promise": "^4.2.1"
-	},
-	"scripts": {
-		"start": "node app/app.js"
+		"bluebird": "3.x",
+		"chalk": "2.x",
+		"debug": "4.x",
+		"lodash": "4.x",
+		"request": "2.x",
+		"request-promise": "4.x",
+		"supports-color": "6.x"
 	}
 }
