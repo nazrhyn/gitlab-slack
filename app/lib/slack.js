@@ -8,6 +8,7 @@ const chalk = require('chalk'),
 	debugCreate = require('debug'),
 	http = require('http'),
 	rp = require('request-promise'),
+	supportsColor = require('supports-color'),
 	util = require('util');
 
 const debug = debugCreate('gitlab-slack:slack');

@@ -1,3 +1,6 @@
+## 2.1.1 / 2018-04-12
+* Fix missing require
+
 ## 2.1.0 / 2018-03-27
 * Remove the use of global `_`, `path`, `config` and the `Promise` override
    * Switch to using relative path requires for everything

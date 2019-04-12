@@ -4,6 +4,7 @@ const _ = require('lodash'),
 	chalk = require('chalk'),
 	debugCreate = require('debug'),
 	http = require('http'),
+	supportsColor = require('supports-color'),
 	util = require('util');
 
 const debug = debugCreate('gitlab-slack:server');

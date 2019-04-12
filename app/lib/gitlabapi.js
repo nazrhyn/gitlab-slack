@@ -5,6 +5,7 @@ const _ = require('lodash'),
 	debugCreate = require('debug'),
 	http = require('http'),
 	rp = require('request-promise'),
+	supportsColor = require('supports-color'),
 	util = require('util');
 
 const API_BASE_ROUTE = '/api/v4',

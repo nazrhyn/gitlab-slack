@@ -1,7 +1,7 @@
 {
 	"private": true,
 	"name": "gitlab-slack",
-	"version": "2.1.0",
+	"version": "2.1.1",
 	"description": "A service that receives webhook notifications from GitLab and posts information to an incoming webhook on Slack.",
 	"main": "app/app.js",
 	"author": "Chris Harwood",
