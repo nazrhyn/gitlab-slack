@@ -1,7 +1,11 @@
-## 2.1.1 / 2018-04-12
+## 2.1.2 / 2019-07-11
+* Update dependencies for audit
+   * **supports-color** -> 7.0.0 
+
+## 2.1.1 / 2019-04-12
 * Fix missing require
 
-## 2.1.0 / 2018-03-27
+## 2.1.0 / 2019-03-27
 * Remove the use of global `_`, `path`, `config` and the `Promise` override
    * Switch to using relative path requires for everything
 * Remove strange `Object.defineProperty` thing from handlers
