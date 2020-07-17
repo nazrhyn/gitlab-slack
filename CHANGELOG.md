@@ -1,3 +1,6 @@
+## 2.1.3 / 2020-07-16
+* Update `package-lock.json` for a vulnerability
+
 ## 2.1.2 / 2019-07-11
 * Update dependencies for audit
    * **supports-color** -> 7.0.0 
