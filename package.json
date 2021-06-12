@@ -18,8 +18,8 @@
 		"relock": "rm -rf node_modules/ package-lock.json && npm install && { npm outdated || true; }"
 	},
 	"engines": {
-		"node": "8.x",
-		"npm": "6.x"
+		"node": ">=8.x",
+		"npm": ">=6.x"
 	},
 	"dependencies": {
 		"bluebird": "3.x",
