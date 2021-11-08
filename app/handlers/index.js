@@ -9,12 +9,14 @@ const _ = require('lodash'),
 	supportsColor = require('supports-color'),
 	util = require('util');
 
-const handleIssue = require('./issue'),
-	handleBranch = require('./branch'),
-	handleCommit = require('./commit'),
-	handleTag = require('./tag'),
-	handleMergeRequest = require('./mergeRequest'),
-	handleWikiPage = require('./wikiPage');
+const handleIssue = require(path.join(global.__paths.handlers, 'issue')),
+	handleBranch = require(path.join(global.__paths.handlers, 'branch')),
+	handleCommit = require(path.join(global.__paths.handlers, 'commit')),
+	handleTag = require(path.join(global.__paths.handlers, 'tag')),
+	handleMergeRequest = require(path.join(global.__paths.handlers, 'mergeRequest')),
+	handleWikiPage = require(path.join(global.__paths.handlers, 'wikiPage')),
+	handlePipelinePage = require(path.join(global.__paths.handlers, 'pipeline')),
+	handleBuildPage = require(path.join(global.__paths.handlers, 'build'));
 
 const debug = debugCreate('gitlab-slack:handler');
 
@@ -73,6 +75,12 @@ exports.handleMessage = async function (projectConfigs, labelColors, issueLabels
 				break;
 			case handleWikiPage.KIND.name:
 				outputs = await handleWikiPage(data);
+				break;
+			case handlePipelinePage.KIND.name:
+				outputs = yield handlePipelinePage(data);
+				break;
+			case handleBuildPage.KIND.name:
+				outputs = yield handleBuildPage(data);
 				break;
 			default:
 				/* eslint-disable camelcase */ // Required property naming.
